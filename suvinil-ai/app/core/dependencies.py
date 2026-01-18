@@ -26,7 +26,7 @@ async def get_current_user(
     if payload is None:
         raise credentials_exception
     
-    username: str = payload.get("sub")
+    username = payload.get("sub")
     if username is None:
         raise credentials_exception
     
@@ -44,50 +44,21 @@ async def get_current_user(
 
 
 async def get_current_active_user(
-    current_user: Optional[dict] = Depends(get_current_user),
-) -> Optional[dict]:
-    """Obtém usuário ativo atual (opcional)"""
-    if current_user is None:
-        return None
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """Obtém usuário ativo atual"""
     if not current_user.get("is_active"):
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
 
-async def require_authenticated_user(
-    current_user: Optional[dict] = Depends(get_current_active_user),
-) -> dict:
-    """Dependency que requer usuário autenticado e ativo"""
-    if current_user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return current_user
-
-
 def require_role(allowed_roles: list[UserRole]):
-    """Factory para criar dependency que requer role específica (requer autenticação)"""
-    async def role_checker(
-        current_user: dict = Depends(require_authenticated_user)
-    ) -> dict:
-        user_role = current_user.get("role")
-        
-        # Se role é string, converter para enum
-        if isinstance(user_role, str):
-            try:
-                user_role = UserRole(user_role)
-            except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Invalid user role",
-                )
-        
-        if user_role not in allowed_roles:
+    """Factory para criar dependency que requer role específica"""
+    async def role_checker(current_user: dict = Depends(get_current_active_user)) -> dict:
+        if current_user.get("role") not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Not enough permissions. Required roles: {[r.value for r in allowed_roles]}",
+                detail="Not enough permissions",
             )
         return current_user
     return role_checker

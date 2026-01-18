@@ -1,4 +1,4 @@
-
+"""Modelo de Tinta"""
 from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, Text, Enum
 from sqlalchemy.orm import relationship
 import enum
@@ -6,13 +6,14 @@ from app.core.database import Base
 
 
 class Environment(str, enum.Enum):
-   
+    """Ambiente de aplicação"""
     INTERIOR = "interno"
     EXTERIOR = "externo"
     BOTH = "ambos"
 
 
 class FinishType(str, enum.Enum):
+    """Tipo de acabamento"""
     FOSCO = "fosco"
     ACETINADO = "acetinado"
     BRILHANTE = "brilhante"
@@ -20,12 +21,14 @@ class FinishType(str, enum.Enum):
 
 
 class PaintLine(str, enum.Enum):
+    """Linha do produto"""
     PREMIUM = "Premium"
     STANDARD = "Standard"
     ECONOMY = "Economy"
 
 
 class Paint(Base):
+    """Modelo de Tinta"""
     __tablename__ = "paints"
     
     id = Column(Integer, primary_key=True, index=True)

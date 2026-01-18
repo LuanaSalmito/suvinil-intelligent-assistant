@@ -5,6 +5,7 @@ from app.models.paint import Environment, FinishType, PaintLine
 
 
 class PaintBase(BaseModel):
+    """Schema base de tinta"""
     name: str
     color: Optional[str] = None
     color_name: Optional[str] = None
@@ -18,10 +19,12 @@ class PaintBase(BaseModel):
 
 
 class PaintCreate(PaintBase):
+    """Schema para criação de tinta"""
     pass
 
 
 class PaintUpdate(BaseModel):
+    """Schema para atualização de tinta"""
     name: Optional[str] = None
     color: Optional[str] = None
     color_name: Optional[str] = None
@@ -36,6 +39,7 @@ class PaintUpdate(BaseModel):
 
 
 class PaintInDB(PaintBase):
+    """Schema de tinta no banco"""
     id: int
     is_active: bool
     created_by: Optional[int] = None
@@ -45,5 +49,5 @@ class PaintInDB(PaintBase):
 
 
 class Paint(PaintInDB):
-   
+    """Schema de resposta de tinta"""
     pass

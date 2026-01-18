@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_user, require_role, require_authenticated_user
+from app.core.dependencies import get_current_active_user, require_role
 from app.models.user import UserRole
 from app.models.paint import Environment, FinishType, PaintLine
 from app.repositories.paint_repository import PaintRepository
@@ -22,12 +22,7 @@ async def list_paints(
     search: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """
-    Lista tintas com filtros opcionais
-    
-    - Acesso público (não requer autenticação)
-    - Todos podem visualizar o catálogo
-    """
+    """Lista tintas com filtros opcionais"""
     paints = PaintRepository.get_all(
         db,
         skip=skip,
@@ -58,12 +53,7 @@ async def create_paint(
     current_user: dict = Depends(require_role([UserRole.ADMIN])),
     db: Session = Depends(get_db),
 ):
-    """
-    Cria nova tinta no catálogo
-    
-    - Requer autenticação
-    - Apenas usuários com role ADMIN podem criar tintas
-    """
+    """Cria nova tinta (apenas admin)"""
     paint = PaintRepository.create(db, paint_data, created_by=current_user["id"])
     return paint
 
@@ -75,12 +65,7 @@ async def update_paint(
     current_user: dict = Depends(require_role([UserRole.ADMIN])),
     db: Session = Depends(get_db),
 ):
-    """
-    Atualiza tinta existente no catálogo
-    
-    - Requer autenticação
-    - Apenas usuários com role ADMIN podem atualizar tintas
-    """
+    """Atualiza tinta (apenas admin)"""
     paint = PaintRepository.update(db, paint_id, paint_data)
     if not paint:
         raise HTTPException(status_code=404, detail="Paint not found")
@@ -93,12 +78,7 @@ async def delete_paint(
     current_user: dict = Depends(require_role([UserRole.ADMIN])),
     db: Session = Depends(get_db),
 ):
-    """
-    Deleta tinta do catálogo
-    
-    - Requer autenticação
-    - Apenas usuários com role ADMIN podem deletar tintas
-    """
+    """Deleta tinta (apenas admin)"""
     success = PaintRepository.delete(db, paint_id)
     if not success:
         raise HTTPException(status_code=404, detail="Paint not found")
