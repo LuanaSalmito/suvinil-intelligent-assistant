@@ -22,5 +22,5 @@ class User(Base):
     full_name = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     role = Column(Enum(UserRole), default=UserRole.USER, nullable=False)
-    
+
     paints = relationship("Paint", back_populates="created_by_user", lazy="dynamic")

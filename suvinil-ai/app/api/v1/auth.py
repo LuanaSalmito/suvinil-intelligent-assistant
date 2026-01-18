@@ -16,7 +16,21 @@ async def login(
     credentials: UserLogin,
     db: Session = Depends(get_db),
 ):
-    """Endpoint de login"""
+    """
+    Endpoint de autenticação/login
+    
+    - Retorna JWT token para uso em requisições autenticadas
+    - Token contém informações do usuário (id, username, role)
+    - Token expira após o tempo configurado em ACCESS_TOKEN_EXPIRE_MINUTES
+    
+    **Roles disponíveis:**
+    - `admin`: Acesso completo (chat + gerenciamento de catálogo)
+    - `user`: Acesso ao chat
+    
+    **Exemplo de uso:**
+    1. Faça login com username e password
+    2. Use o token retornado no header: `Authorization: Bearer <token>`
+    """
     user = UserRepository.get_by_username(db, credentials.username)
     
     if not user or not verify_password(credentials.password, user.hashed_password):
@@ -34,7 +48,12 @@ async def login(
     
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.username, "user_id": user.id, "role": user.role.value},
+        data={
+            "sub": user.username,
+            "user_id": user.id,
+            "role": user.role.value,
+            "email": user.email,
+        },
         expires_delta=access_token_expires,
     )
     

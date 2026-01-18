@@ -19,56 +19,79 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Criar enums do PostgreSQL
-    userrole_enum = postgresql.ENUM('admin', 'user', name='userrole')
-    userrole_enum.create(op.get_bind(), checkfirst=True)
+    # Criar enums do PostgreSQL (se não existirem)
+    # Usando SQL direto porque checkfirst não funciona bem com enums PostgreSQL
+    connection = op.get_bind()
     
-    environment_enum = postgresql.ENUM('interno', 'externo', 'ambos', name='environment')
-    environment_enum.create(op.get_bind(), checkfirst=True)
+    # Criar userrole enum
+    connection.execute(sa.text(
+        "DO $$ BEGIN CREATE TYPE userrole AS ENUM ('admin', 'user'); EXCEPTION WHEN duplicate_object THEN null; END $$;"
+    ))
     
-    finishtype_enum = postgresql.ENUM('fosco', 'acetinado', 'brilhante', 'semi-brilhante', name='finishtype')
-    finishtype_enum.create(op.get_bind(), checkfirst=True)
+    # Criar environment enum
+    connection.execute(sa.text(
+        "DO $$ BEGIN CREATE TYPE environment AS ENUM ('interno', 'externo', 'ambos'); EXCEPTION WHEN duplicate_object THEN null; END $$;"
+    ))
     
-    paintline_enum = postgresql.ENUM('Premium', 'Standard', 'Economy', name='paintline')
-    paintline_enum.create(op.get_bind(), checkfirst=True)
+    # Criar finishtype enum
+    connection.execute(sa.text(
+        "DO $$ BEGIN CREATE TYPE finishtype AS ENUM ('fosco', 'acetinado', 'brilhante', 'semi-brilhante'); EXCEPTION WHEN duplicate_object THEN null; END $$;"
+    ))
     
-    # Criar tabela users
-    op.create_table(
-        'users',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('email', sa.String(), nullable=False),
-        sa.Column('username', sa.String(), nullable=False),
-        sa.Column('hashed_password', sa.String(), nullable=False),
-        sa.Column('full_name', sa.String(), nullable=True),
-        sa.Column('is_active', sa.Boolean(), nullable=True, server_default='true'),
-        sa.Column('role', userrole_enum, nullable=False, server_default='user'),
-        sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
-    op.create_index(op.f('ix_users_id'), 'users', ['id'], unique=False)
-    op.create_index(op.f('ix_users_username'), 'users', ['username'], unique=True)
+    # Criar paintline enum
+    connection.execute(sa.text(
+        "DO $$ BEGIN CREATE TYPE paintline AS ENUM ('Premium', 'Standard', 'Economy'); EXCEPTION WHEN duplicate_object THEN null; END $$;"
+    ))
     
-    # Criar tabela paints
-    op.create_table(
-        'paints',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('name', sa.String(), nullable=False),
-        sa.Column('color', sa.String(), nullable=True),
-        sa.Column('color_name', sa.String(), nullable=True),
-        sa.Column('surface_type', sa.String(), nullable=True),
-        sa.Column('environment', environment_enum, nullable=False, server_default='interno'),
-        sa.Column('finish_type', finishtype_enum, nullable=False, server_default='fosco'),
-        sa.Column('features', sa.Text(), nullable=True),
-        sa.Column('line', paintline_enum, nullable=False, server_default='Standard'),
-        sa.Column('price', sa.Float(), nullable=True),
-        sa.Column('description', sa.Text(), nullable=True),
-        sa.Column('is_active', sa.Boolean(), nullable=True, server_default='true'),
-        sa.Column('created_by', sa.Integer(), nullable=True),
-        sa.ForeignKeyConstraint(['created_by'], ['users.id'], ),
-        sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index(op.f('ix_paints_id'), 'paints', ['id'], unique=False)
-    op.create_index(op.f('ix_paints_name'), 'paints', ['name'], unique=False)
+    # Definir os enums para uso nas tabelas
+    userrole_enum = postgresql.ENUM('admin', 'user', name='userrole', create_type=False)
+    environment_enum = postgresql.ENUM('interno', 'externo', 'ambos', name='environment', create_type=False)
+    finishtype_enum = postgresql.ENUM('fosco', 'acetinado', 'brilhante', 'semi-brilhante', name='finishtype', create_type=False)
+    paintline_enum = postgresql.ENUM('Premium', 'Standard', 'Economy', name='paintline', create_type=False)
+    
+    # Verificar se tabelas já existem antes de criar
+    inspector = sa.inspect(connection)
+    existing_tables = inspector.get_table_names()
+    
+    # Criar tabela users (se não existir)
+    if 'users' not in existing_tables:
+        op.create_table(
+            'users',
+            sa.Column('id', sa.Integer(), nullable=False),
+            sa.Column('email', sa.String(), nullable=False),
+            sa.Column('username', sa.String(), nullable=False),
+            sa.Column('hashed_password', sa.String(), nullable=False),
+            sa.Column('full_name', sa.String(), nullable=True),
+            sa.Column('is_active', sa.Boolean(), nullable=True, server_default='true'),
+            sa.Column('role', userrole_enum, nullable=False, server_default='user'),
+            sa.PrimaryKeyConstraint('id')
+        )
+        op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
+        op.create_index(op.f('ix_users_id'), 'users', ['id'], unique=False)
+        op.create_index(op.f('ix_users_username'), 'users', ['username'], unique=True)
+    
+    # Criar tabela paints (se não existir)
+    if 'paints' not in existing_tables:
+        op.create_table(
+            'paints',
+            sa.Column('id', sa.Integer(), nullable=False),
+            sa.Column('name', sa.String(), nullable=False),
+            sa.Column('color', sa.String(), nullable=True),
+            sa.Column('color_name', sa.String(), nullable=True),
+            sa.Column('surface_type', sa.String(), nullable=True),
+            sa.Column('environment', environment_enum, nullable=False, server_default='interno'),
+            sa.Column('finish_type', finishtype_enum, nullable=False, server_default='fosco'),
+            sa.Column('features', sa.Text(), nullable=True),
+            sa.Column('line', paintline_enum, nullable=False, server_default='Standard'),
+            sa.Column('price', sa.Float(), nullable=True),
+            sa.Column('description', sa.Text(), nullable=True),
+            sa.Column('is_active', sa.Boolean(), nullable=True, server_default='true'),
+            sa.Column('created_by', sa.Integer(), nullable=True),
+            sa.ForeignKeyConstraint(['created_by'], ['users.id'], ),
+            sa.PrimaryKeyConstraint('id')
+        )
+        op.create_index(op.f('ix_paints_id'), 'paints', ['id'], unique=False)
+        op.create_index(op.f('ix_paints_name'), 'paints', ['name'], unique=False)
 
 
 def downgrade() -> None:
