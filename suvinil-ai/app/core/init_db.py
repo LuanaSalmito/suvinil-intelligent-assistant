@@ -14,8 +14,10 @@ from app.models.paint import Paint, Environment, FinishType, PaintLine
 
 def init_db():
     """Inicializa banco de dados com dados de exemplo"""
-    print("🗄️  Criando tabelas...")
-    Base.metadata.create_all(bind=engine)
+    # Nota: As tabelas devem ser criadas via Alembic primeiro
+    # Execute: alembic upgrade head
+    print("🗄️  Verificando tabelas (criadas via Alembic)...")
+    # Base.metadata.create_all(bind=engine)  # Desabilitado - use Alembic
     
     db = SessionLocal()
     try:
