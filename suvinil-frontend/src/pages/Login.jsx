@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -23,7 +23,18 @@ export function Login() {
       // Redirecionar para chat após login bem-sucedido
       navigate('/chat', { replace: true });
     } catch (err) {
-      setError(err.response?.data?.detail || 'Erro ao fazer login. Verifique suas credenciais.');
+      // O detail pode ser string ou array de objetos de validação
+      const detail = err.response?.data?.detail;
+      let errorMessage = 'Erro ao fazer login. Verifique suas credenciais.';
+      
+      if (typeof detail === 'string') {
+        errorMessage = detail;
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        // Pydantic validation error format
+        errorMessage = detail.map(e => e.msg || e.message || JSON.stringify(e)).join(', ');
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -76,6 +87,16 @@ export function Login() {
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading ? 'Entrando...' : 'Entrar'}
             </Button>
+
+            <div className="text-center text-sm text-muted-foreground">
+              Não tem uma conta?{' '}
+              <Link
+                to="/register"
+                className="text-primary hover:underline font-medium"
+              >
+                Criar conta
+              </Link>
+            </div>
           </form>
           <div className="mt-4 text-xs text-center text-muted-foreground">
             <p>Admin: admin / admin123</p>

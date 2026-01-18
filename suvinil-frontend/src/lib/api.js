@@ -30,27 +30,57 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       // Token expirado ou inválido
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      const token = localStorage.getItem('token');
+      
+      // Só limpa e redireciona se havia um token (usuário estava autenticado)
+      // Se não havia token, é um endpoint que requer auth mas usuário não está logado
+      // Nesse caso, não redireciona automaticamente (permite que o componente trate)
+      if (token) {
+        console.warn('Token inválido ou expirado. Fazendo logout...');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        
+        // Só redireciona se não estiver já na página de login
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+      }
+      // Se não havia token, apenas rejeita o erro (endpoint pode funcionar sem auth)
     }
     return Promise.reject(error);
   }
 );
 
 export const authApi = {
+  register: async (userData) => {
+    const response = await api.post('/auth/register', userData);
+    return response.data;
+  },
   login: async (username, password) => {
-    const response = await api.post('/auth/login', { username, password });
+    // OAuth2 espera form-data, não JSON
+    const formData = new URLSearchParams();
+    formData.append('username', username);
+    formData.append('password', password);
+    
+    const response = await axios.post(`${API_BASE_URL}/auth/login`, formData, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    });
+    
     if (response.data.access_token) {
       localStorage.setItem('token', response.data.access_token);
       // Buscar informações do usuário usando o token
       try {
+        await new Promise(resolve => setTimeout(resolve, 100));
         const userResponse = await api.get('/users/me');
         localStorage.setItem('user', JSON.stringify(userResponse.data));
         return { ...response.data, user: userResponse.data };
       } catch (error) {
         console.error('Error fetching user info:', error);
-        // Mesmo se falhar, retorna o token
+        if (error.response?.status === 401) {
+          console.warn('Token recebido mas não válido para /users/me. Pode ser problema temporário.');
+        }
         return response.data;
       }
     }
@@ -66,11 +96,21 @@ export const authApi = {
   },
   refreshUser: async () => {
     try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.warn('No token available to refresh user info');
+        return null;
+      }
       const userResponse = await api.get('/users/me');
       localStorage.setItem('user', JSON.stringify(userResponse.data));
       return userResponse.data;
     } catch (error) {
       console.error('Error refreshing user info:', error);
+      // Se for 401, limpa o token inválido
+      if (error.response?.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      }
       return null;
     }
   },
