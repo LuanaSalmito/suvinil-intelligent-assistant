@@ -1,4 +1,3 @@
-"""Serviço de Agente IA com ferramentas e memória"""
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from langchain_openai import ChatOpenAI
@@ -13,7 +12,7 @@ import json
 
 
 class AgentService:
-    """Serviço de agente IA com ferramentas"""
+  
     
     def __init__(self, db: Session):
         self.db = db
