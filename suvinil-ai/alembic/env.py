@@ -18,6 +18,7 @@ from app.core.database import Base
 # Importar todos os modelos para que o Alembic possa detectá-los
 from app.models.user import User, UserRole
 from app.models.paint import Paint, Environment, FinishType, PaintLine
+from app.models.chat_message import ChatMessage
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
