@@ -20,7 +20,7 @@ app = FastAPI(
     swagger_ui_parameters={"persistAuthorization": True}
 )
 
-# ✅ CORS CORRETO
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
