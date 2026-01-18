@@ -11,7 +11,9 @@ from app.api.v1 import auth, users, paints, ai_chat
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle events da aplicação"""
-    Base.metadata.create_all(bind=engine)
+    # Nota: Migrações são gerenciadas pelo Alembic
+    # Execute 'alembic upgrade head' antes de iniciar a aplicação
+    # Base.metadata.create_all(bind=engine)  # Desabilitado - use Alembic
     yield
 
 
