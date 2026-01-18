@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # Banco de dados PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: suvinil-postgres-prod
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-suvinil_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - suvinil-network
+    restart: unless-stopped
+
+  # Backend API (FastAPI)
+  backend:
+    build:
+      context: ./suvinil-ai
+      dockerfile: Dockerfile
+    container_name: suvinil-backend-prod
+    command: >
+      sh -c "
+        echo '⏳ Aguardando PostgreSQL...' &&
+        sleep 5 &&
+        echo '🔄 Rodando migrações...' &&
+        alembic upgrade head &&
+        echo '🚀 Iniciando servidor...' &&
+        uvicorn main:app --host 0.0.0.0 --port 8000
+      "
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-suvinil_db}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ENVIRONMENT=production
+      - DEBUG=False
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - suvinil-network
+    restart: unless-stopped
+
+  # Frontend (React/Vite) - Produção com Nginx
+  frontend:
+    build:
+      context: ./suvinil-frontend
+      dockerfile: Dockerfile.prod
+    container_name: suvinil-frontend-prod
+    ports:
+      - "80:80"
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+    depends_on:
+      - backend
+    networks:
+      - suvinil-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  suvinil-network:
+    driver: bridge

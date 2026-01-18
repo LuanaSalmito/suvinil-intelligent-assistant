@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './pages/Login';
+import { Register } from './pages/Register';
 import { Chat } from './pages/Chat';
 import { Admin } from './pages/Admin';
 import './App.css';
@@ -39,6 +40,7 @@ function AppRoutes() {
       <Route path="/" element={<Chat />} />
       <Route path="/chat" element={<Chat />} />
       <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
       <Route
         path="/admin"
         element={
