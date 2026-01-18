@@ -1,7 +1,4 @@
-"""
-Suvinil AI - Catálogo Inteligente de Tintas
-Main entry point da aplicação FastAPI
-"""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -14,10 +11,8 @@ from app.api.v1 import auth, users, paints, ai_chat
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle events da aplicação"""
-    # Startup: criar tabelas se não existirem
     Base.metadata.create_all(bind=engine)
     yield
-    # Shutdown (se necessário)
 
 
 app = FastAPI(
@@ -29,16 +24,16 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Em produção, especificar domínios
+    allow_origins=["*"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Routers
+
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(paints.router, prefix="/paints", tags=["Paints"])

@@ -1,4 +1,4 @@
-"""Serviço RAG (Retrieval-Augmented Generation)"""
+
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
