@@ -7,7 +7,6 @@ from app.core.security import get_password_hash
 
 
 class UserRepository:
-    """Repository para operações de usuário"""
     
     @staticmethod
     def get_by_id(db: Session, user_id: int) -> Optional[User]:
@@ -21,7 +20,7 @@ class UserRepository:
     
     @staticmethod
     def get_by_username(db: Session, username: str) -> Optional[User]:
-        """Busca usuário por username"""
+     
         return db.query(User).filter(User.username == username).first()
     
     @staticmethod
