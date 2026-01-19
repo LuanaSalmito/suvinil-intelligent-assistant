@@ -145,6 +145,10 @@ export const paintsApi = {
     const response = await api.get('/paints', { params });
     return response.data;
   },
+  getCount: async (params = {}) => {
+    const response = await api.get('/paints/count', { params });
+    return response.data;
+  },
   getById: async (id) => {
     const response = await api.get(`/paints/${id}`);
     return response.data;

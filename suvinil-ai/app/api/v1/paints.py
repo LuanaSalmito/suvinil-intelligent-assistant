@@ -7,7 +7,7 @@ from app.core.dependencies import get_current_active_user, require_role
 from app.models.user import UserRole
 from app.models.paint import Environment, FinishType, PaintLine
 from app.repositories.paint_repository import PaintRepository
-from app.schemas.paint import Paint, PaintCreate, PaintUpdate
+from app.schemas.paint import Paint, PaintCreate, PaintUpdate, PaintCount
 
 router = APIRouter()
 
@@ -33,6 +33,25 @@ async def list_paints(
         search=search,
     )
     return paints
+
+
+@router.get("/count", response_model=PaintCount)
+async def count_paints(
+    environment: Optional[Environment] = None,
+    finish_type: Optional[FinishType] = None,
+    line: Optional[PaintLine] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Conta tintas ativas com filtros opcionais"""
+    total = PaintRepository.count_active(
+        db,
+        environment=environment,
+        finish_type=finish_type,
+        line=line,
+        search=search,
+    )
+    return PaintCount(total=total)
 
 
 @router.get("/{paint_id}", response_model=Paint)

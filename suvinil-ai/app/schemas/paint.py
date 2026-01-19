@@ -51,3 +51,8 @@ class PaintInDB(PaintBase):
 class Paint(PaintInDB):
     """Schema de resposta de tinta"""
     pass
+
+
+class PaintCount(BaseModel):
+    """Schema para contagem de tintas"""
+    total: int

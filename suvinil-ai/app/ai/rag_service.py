@@ -95,12 +95,13 @@ PALAVRAS-CHAVE:
             "line": paint.line.value,
             "surface_type": paint.surface_type or "",
             "features": paint.features or "",
+            "description": paint.description or "",
             "price": paint.price or 0,
         }
 
         return Document(page_content=text, metadata=metadata)
 
-    def _initialize_vectorstore(self):
+    def _initialize_vectorstore(self) -> int:
         """Cria ou recria o vector store com dados atualizados."""
 
         logger.info("Inicializando vector store de tintas...")
@@ -110,9 +111,14 @@ PALAVRAS-CHAVE:
 
             if not paints:
                 logger.warning("Nenhuma tinta encontrada para indexação.")
-                return
+                return 0
 
             documents = [self._paint_to_document(p) for p in paints]
+            blue_count = sum(
+                1 for p in paints
+                if any(term in (p.color_name or "").lower() for term in ["azul", "blue"])
+                or any(term in (p.color or "").lower() for term in ["azul", "blue"])
+            )
 
             if os.path.exists(self.PERSIST_DIRECTORY):
                 shutil.rmtree(self.PERSIST_DIRECTORY, ignore_errors=True)
@@ -125,6 +131,8 @@ PALAVRAS-CHAVE:
             )
 
             logger.info(f"Vector store criado com {len(documents)} tintas.")
+            logger.info(f"Tintas azuis indexadas: {blue_count}")
+            return len(documents)
 
         except Exception as e:
             logger.error(f"Erro ao criar vector store: {e}")
@@ -139,6 +147,7 @@ PALAVRAS-CHAVE:
                     logger.info("Vector store carregado do disco como fallback.")
                 except Exception as e2:
                     logger.error(f"Falha ao carregar vector store: {e2}")
+            return 0
 
     # ---------------------------------------------------------------------
     # BUSCA
@@ -165,12 +174,20 @@ PALAVRAS-CHAVE:
                 where_filter["finish_type"] = filter_finish
 
         try:
+            logger.info(
+                "[RAG] Busca: query='%s' env=%s finish=%s k=%s",
+                query,
+                filter_environment,
+                filter_finish,
+                k,
+            )
             if where_filter:
                 results = self.vectorstore.similarity_search_with_score(
                     query, k=k, filter=where_filter
                 )
             else:
                 results = self.vectorstore.similarity_search_with_score(query, k=k)
+            logger.info("[RAG] Resultados encontrados: %s", len(results))
 
             paints = []
             seen_ids = set()
@@ -189,6 +206,17 @@ PALAVRAS-CHAVE:
                     "similarity_score": float(score),
                 })
 
+            if paints:
+                preview = [
+                    {
+                        "id": p.get("paint_id"),
+                        "name": p.get("name"),
+                        "color": p.get("color"),
+                        "score": f"{p.get('similarity_score'):.3f}",
+                    }
+                    for p in paints[:3]
+                ]
+                logger.info("[RAG] Top resultados: %s", preview)
             return paints
 
         except Exception as e:
@@ -200,18 +228,27 @@ PALAVRAS-CHAVE:
     # ---------------------------------------------------------------------
 
     def _paint_context_snippet(self, paint: Dict[str, Any]) -> str:
-        """Resumo curto e amigável de uma tinta para uso no prompt."""
-
+        """
+        Resumo curto e conversacional de uma tinta para uso no prompt.
+        Foca em benefícios práticos ao invés de specs técnicas.
+        """
+        features = paint.get('features', '') or 'Boa cobertura, acabamento bonito e fácil manutenção.'
+        
+        # Simplificar lista de features para algo mais digerível
+        features_list = [f.strip() for f in features.split(',')[:3]]  # Máximo 3 features
+        features_readable = ' e '.join(features_list) if features_list else features
+        
         return f"""
 Produto: {paint['name']}
-Cor: {paint['color'] or 'Não especificada'}
-Ambiente indicado: {paint['environment']}
-Acabamento: {paint['finish_type']}
-Linha: {paint['line']}
-Preço aproximado: R$ {paint['price']}
+Cor: {paint['color'] or 'Disponível em diversas cores'}
+Melhor uso: {paint['environment']} ({paint['surface_type'] or 'múltiplas superfícies'})
+Acabamento: {paint['finish_type']} - Linha {paint['line']}
+Investimento: R$ {paint['price']:.2f}
 
-Principais benefícios:
-{paint['features'] or 'Boa cobertura, acabamento bonito e fácil manutenção.'}
+Por que considerar:
+{features_readable}
+
+Contexto adicional: {paint.get('description', 'Tinta Suvinil com qualidade reconhecida.')}
 """.strip()
 
     # ---------------------------------------------------------------------
@@ -226,8 +263,8 @@ Principais benefícios:
         filter_finish: Optional[str] = None,
     ) -> str:
         """
-        Responde perguntas do usuário de forma natural e amigável,
-        usando RAG + LLM.
+        Responde perguntas do usuário de forma natural, conversacional e empática,
+        usando RAG + LLM com processo de summarização e reescrita para máxima humanização.
         """
 
         results = self.search_paints(
@@ -238,52 +275,21 @@ Principais benefícios:
         )
 
         if not results:
-            return (
-                "Não encontrei uma tinta perfeita com base no que você descreveu, "
-                "mas posso te ajudar se quiser ajustar a busca ou me contar um pouco mais 😊"
-            )
+            return "Não encontrei tintas que correspondam exatamente à sua busca. Me conta mais sobre o ambiente e as características que você precisa?"
 
-        context = "\n\n---\n\n".join(
-            self._paint_context_snippet(p) for p in results
-        )
-
-        llm = ChatOpenAI(
-            model="gpt-4o-mini",
-            temperature=0.7,
-            openai_api_key=settings.OPENAI_API_KEY,
-        )
-
-        system_prompt = """
-Você é um consultor especialista em tintas Suvinil.
-
-Seu tom deve ser:
-- Amigável
-- Natural
-- Claro
-- Próximo do cliente
-
-Explique as opções como se estivesse ajudando alguém dentro de uma loja.
-Evite listas técnicas e linguagem robótica.
-
-Sempre finalize convidando o cliente a continuar a conversa.
-"""
-
-        user_prompt = f"""
-Pergunta do cliente:
-"{query}"
-
-Use as opções abaixo para responder de forma clara e acolhedora.
-
-Opções disponíveis:
-{context}
-"""
-
-        response = llm.invoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
-        ])
-
-        return response.content
+        # Retorna informações diretas do primeiro resultado mais relevante
+        p = results[0]
+        features = ", ".join([f.strip() for f in (p.get("features", "").split(",") if p.get("features") else [])[:2]])
+        
+        response = f"{p.get('name')} - {p.get('color') or 'cor variável'}"
+        if features:
+            response += f", {features}"
+        response += f", acabamento {p.get('finish_type')}"
+        if p.get("price"):
+            response += f". R$ {p.get('price'):.2f}"
+        response += f". Ambiente: {p.get('environment')}."
+        
+        return response
 
     # ---------------------------------------------------------------------
     # UTILIDADES
@@ -299,7 +305,7 @@ Opções disponíveis:
 
         return [r for r in results if r["paint_id"] != paint_id][:k]
 
-    def reindex(self):
+    def reindex(self) -> int:
         """Força reindexação completa."""
         logger.info("Reindexando vector store manualmente...")
-        self._initialize_vectorstore()
+        return self._initialize_vectorstore()
