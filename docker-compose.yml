@@ -18,7 +18,7 @@ services:
     container_name: suvinil-backend
     build:
       context: ./suvinil-ai
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,6 +34,9 @@ services:
       DEBUG: "true"
     ports:
       - "8000:8000"
+    volumes:
+      - ./suvinil-ai/app:/app/app
+      - ./suvinil-ai/main.py:/app/main.py
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -49,3 +52,8 @@ services:
         condition: service_healthy
     ports:
       - "5173:5173"
+    volumes:
+      - ./suvinil-frontend/src:/app/src
+      - ./suvinil-frontend/public:/app/public
+      - ./suvinil-frontend/index.html:/app/index.html
+      - ./suvinil-frontend/vite.config.js:/app/vite.config.js

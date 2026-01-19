@@ -1,6 +1,6 @@
 """Schemas de Tinta"""
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, field_validator, model_validator
+from typing import Optional, List
 from app.models.paint import Ambiente, Acabamento, Linha
 
 
@@ -42,9 +42,42 @@ class PaintInDB(PaintBase):
         from_attributes = True
 
 
-class Paint(PaintInDB):
+class Paint(BaseModel):
     """Schema de resposta de tinta"""
-    pass
+    id: int
+    nome: str
+    cor: Optional[str] = None
+    tipo_parede: Optional[str] = None
+    ambiente: Ambiente
+    acabamento: Acabamento
+    features: List[str] = []
+    aplicacao: List[str] = []
+    linha: Linha
+    is_active: bool
+    created_by: Optional[int] = None
+    
+    @field_validator('features', mode='before')
+    @classmethod
+    def parse_features(cls, v):
+        """Converte features de string para lista"""
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            return [f.strip() for f in v.split(',') if f.strip()]
+        return []
+    
+    @model_validator(mode='after')
+    def populate_aplicacao(self):
+        """Popula aplicacao baseado no tipo_parede"""
+        if not self.aplicacao or len(self.aplicacao) == 0:
+            if self.tipo_parede:
+                self.aplicacao = [t.strip() for t in self.tipo_parede.split(',') if t.strip()]
+        return self
+    
+    class Config:
+        from_attributes = True
 
 
 class PaintCount(BaseModel):

@@ -6,13 +6,15 @@ import { Button } from '../components/ui/Button';
 import { ChatBubble, ChatBubbleMessage } from '../components/chat/ChatBubble';
 import { ChatInput } from '../components/chat/ChatInput';
 import { ChatMessageList } from '../components/chat/ChatMessageList';
-import { Settings, LogOut, LayoutDashboard, LogIn, Paperclip, Image as ImageIcon } from 'lucide-react';
+import { CatalogModal } from '../components/catalog/CatalogModal';
+import { Settings, LogOut, LayoutDashboard, LogIn, Paperclip, Image as ImageIcon, BookOpen } from 'lucide-react';
 
 export function Chat() {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [paintCount, setPaintCount] = useState(null);
+  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
   const { user, logout, isAdmin, isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
@@ -128,6 +130,19 @@ export function Chat() {
         </div>
       </header>
 
+      {/* Catalog Button */}
+      <div className="border-b bg-card px-4 py-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setIsCatalogOpen(true)}
+          className="w-full sm:w-auto"
+        >
+          <BookOpen className="h-4 w-4 mr-2" />
+          Catálogo Completo
+        </Button>
+      </div>
+
       {/* Chat Messages */}
       <div className="flex-1 overflow-hidden">
         <ChatMessageList>
@@ -190,6 +205,12 @@ export function Chat() {
           </Button>
         </div>
       </div>
+
+      {/* Catalog Modal */}
+      <CatalogModal
+        isOpen={isCatalogOpen}
+        onClose={() => setIsCatalogOpen(false)}
+      />
     </div>
   );
 }
