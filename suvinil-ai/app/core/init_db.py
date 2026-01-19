@@ -20,15 +20,22 @@ from app.models.paint import Paint, Ambiente, Acabamento, Linha
 
 def load_tintas_from_xlsx() -> list:
     """Carrega tintas do arquivo XLSX"""
-    xlsx_path = Path(__file__).parent.parent / "docs" / "Base_de_Dados_de_Tintas_Suvinil.xlsx"
+    # Arquivo fica em /docs (raiz do projeto do backend dentro do container)
+    project_root = Path(__file__).parent.parent.parent
+    docs_dir = project_root / "docs"
+
+    # Aceita variações do nome (ex.: "Base_de_Dados_de_Tintas_Suvinil (2).xlsx")
+    candidates = sorted(docs_dir.glob("*.xlsx"))
+    preferred = [p for p in candidates if "Base_de_Dados_de_Tintas_Suvinil" in p.name]
+    xlsx_path = (preferred[0] if preferred else (candidates[0] if candidates else None))
     
-    if not xlsx_path.exists():
-        print(f"      AVISO: Arquivo XLSX não encontrado em {xlsx_path}")
+    if not xlsx_path or not xlsx_path.exists():
+        print(f"      AVISO: Nenhum arquivo XLSX encontrado em {docs_dir}")
         return []
     
     try:
         from openpyxl import load_workbook
-        wb = load_workbook(xlsx_path)
+        wb = load_workbook(xlsx_path, data_only=True)
         ws = wb.active
         
         tintas = []
@@ -80,6 +87,7 @@ def load_tintas_from_xlsx() -> list:
             }
             tintas.append(tinta)
         
+        print(f"      XLSX carregado: {xlsx_path.name} ({len(tintas)} linhas)")
         return tintas
         
     except ImportError:

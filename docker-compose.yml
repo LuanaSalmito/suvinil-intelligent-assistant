@@ -1,89 +1,51 @@
-version: '3.8'
-
 services:
-  # Banco de dados PostgreSQL
   postgres:
     image: postgres:15-alpine
     container_name: suvinil-postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: suvinil_db
+      POSTGRES_DB: suvinil
+      POSTGRES_USER: suvinil
+      POSTGRES_PASSWORD: suvinil
     ports:
       - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U suvinil"]
+      interval: 5s
       timeout: 5s
       retries: 5
-    networks:
-      - suvinil-network
 
-  # Backend API (FastAPI)
   backend:
+    container_name: suvinil-backend
     build:
       context: ./suvinil-ai
-      dockerfile: Dockerfile
-    container_name: suvinil-backend
-    command: >
-      sh -c "
-        echo '⏳ Aguardando PostgreSQL...' &&
-        sleep 5 &&
-        echo '🔄 Rodando migrações...' &&
-        alembic upgrade head &&
-        echo '📊 Inicializando banco de dados...' &&
-        python -m app.core.init_db || true &&
-        echo '🚀 Iniciando servidor...' &&
-        uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-      "
-    volumes:
-      - ./suvinil-ai:/app
-    ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/suvinil_db
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production-min-32-chars}
-      - ALGORITHM=HS256
-      - ACCESS_TOKEN_EXPIRE_MINUTES=30
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ENVIRONMENT=development
-      - DEBUG=True
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
     depends_on:
       postgres:
         condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://suvinil:suvinil@postgres:5432/suvinil
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_CHAT_MODEL: gpt-4o-mini
+      OPENAI_EMBEDDING_MODEL: text-embedding-3-small
+      SECRET_KEY: ${SECRET_KEY:-secret_key}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      ENVIRONMENT: development
+      DEBUG: "true"
+    ports:
+      - "8000:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - suvinil-network
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Frontend (React/Vite)
   frontend:
+    container_name: suvinil-frontend
     build:
       context: ./suvinil-frontend
-      dockerfile: Dockerfile
-    container_name: suvinil-frontend
-    volumes:
-      - ./suvinil-frontend:/app
-      - /app/node_modules
-    ports:
-      - "5173:5173"
-    environment:
-      - VITE_API_URL=http://localhost:8000
-      - CHOKIDAR_USEPOLLING=true
     depends_on:
       backend:
         condition: service_healthy
-    networks:
-      - suvinil-network
-
-volumes:
-  postgres_data:
-
-networks:
-  suvinil-network:
-    driver: bridge
+    ports:
+      - "5173:5173"
