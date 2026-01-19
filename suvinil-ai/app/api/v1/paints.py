@@ -5,7 +5,7 @@ from typing import List, Optional
 from app.core.database import get_db
 from app.core.dependencies import get_current_active_user, require_role
 from app.models.user import UserRole
-from app.models.paint import Environment, FinishType, PaintLine
+from app.models.paint import Ambiente, Acabamento, Linha
 from app.repositories.paint_repository import PaintRepository
 from app.schemas.paint import Paint, PaintCreate, PaintUpdate, PaintCount
 
@@ -16,9 +16,9 @@ router = APIRouter()
 async def list_paints(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    environment: Optional[Environment] = None,
-    finish_type: Optional[FinishType] = None,
-    line: Optional[PaintLine] = None,
+    ambiente: Optional[Ambiente] = None,
+    acabamento: Optional[Acabamento] = None,
+    linha: Optional[Linha] = None,
     search: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
@@ -27,9 +27,9 @@ async def list_paints(
         db,
         skip=skip,
         limit=limit,
-        environment=environment,
-        finish_type=finish_type,
-        line=line,
+        ambiente=ambiente,
+        acabamento=acabamento,
+        linha=linha,
         search=search,
     )
     return paints
@@ -37,18 +37,18 @@ async def list_paints(
 
 @router.get("/count", response_model=PaintCount)
 async def count_paints(
-    environment: Optional[Environment] = None,
-    finish_type: Optional[FinishType] = None,
-    line: Optional[PaintLine] = None,
+    ambiente: Optional[Ambiente] = None,
+    acabamento: Optional[Acabamento] = None,
+    linha: Optional[Linha] = None,
     search: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """Conta tintas ativas com filtros opcionais"""
     total = PaintRepository.count_active(
         db,
-        environment=environment,
-        finish_type=finish_type,
-        line=line,
+        ambiente=ambiente,
+        acabamento=acabamento,
+        linha=linha,
         search=search,
     )
     return PaintCount(total=total)
@@ -62,7 +62,7 @@ async def get_paint(
     """Obtém tinta por ID"""
     paint = PaintRepository.get_by_id(db, paint_id)
     if not paint or not paint.is_active:
-        raise HTTPException(status_code=404, detail="Paint not found")
+        raise HTTPException(status_code=404, detail="Tinta não encontrada")
     return paint
 
 
@@ -73,7 +73,7 @@ async def create_paint(
     db: Session = Depends(get_db),
 ):
     """Cria nova tinta (apenas admin)"""
-    paint = PaintRepository.create(db, paint_data, created_by=current_user["id"])
+    paint = PaintRepository.create(db, paint_data.model_dump(), created_by=current_user["id"])
     return paint
 
 
@@ -85,9 +85,9 @@ async def update_paint(
     db: Session = Depends(get_db),
 ):
     """Atualiza tinta (apenas admin)"""
-    paint = PaintRepository.update(db, paint_id, paint_data)
+    paint = PaintRepository.update(db, paint_id, paint_data.model_dump(exclude_unset=True))
     if not paint:
-        raise HTTPException(status_code=404, detail="Paint not found")
+        raise HTTPException(status_code=404, detail="Tinta não encontrada")
     return paint
 
 
@@ -100,4 +100,4 @@ async def delete_paint(
     """Deleta tinta (apenas admin)"""
     success = PaintRepository.delete(db, paint_id)
     if not success:
-        raise HTTPException(status_code=404, detail="Paint not found")
+        raise HTTPException(status_code=404, detail="Tinta não encontrada")

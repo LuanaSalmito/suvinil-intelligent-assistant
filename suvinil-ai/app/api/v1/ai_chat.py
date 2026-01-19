@@ -1,16 +1,17 @@
 import re
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+import hashlib
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_user
+from app.core.dependencies import get_current_active_user, get_current_user_optional
 from app.core.config import settings
 from app.repositories.paint_repository import PaintRepository
-from app.ai.rag_service import RagService
+from app.ai.rag_service import RAGService
 from app.ai.image_generator import ImageGenerator
 from app.models.chat_message import ChatMessage
 
@@ -20,8 +21,8 @@ router = APIRouter()
 
 # Armazenar sessões de agentes por usuário (em produção, usar Redis)
 _agent_sessions: Dict[int, Any] = {}
-_orchestrator_sessions: Dict[int, Any] = {}
-_fallback_state: Dict[int, Dict[str, Any]] = {}
+_orchestrator_sessions: Dict[Any, Any] = {}
+_fallback_state: Dict[Any, Dict[str, Any]] = {}
 
 
 # ============================================================================
@@ -152,7 +153,23 @@ class VisualizationResponse(BaseModel):
 
 def _is_openai_configured() -> bool:
     """Verifica se a OpenAI está configurada"""
-    return bool(settings.OPENAI_API_KEY and settings.OPENAI_API_KEY.startswith("sk-"))
+    key = (settings.OPENAI_API_KEY or "").strip().strip('"').strip("'")
+    # OpenAI keys normalmente começam com "sk-" (inclui "sk-proj-")
+    return bool(key and key.startswith("sk-"))
+
+def _is_price_query(message: str) -> bool:
+    """
+    Detecta intenções de consulta de preço.
+    Importante: usado para evitar chamadas ao LLM quando o usuário só quer valores do catálogo.
+    """
+    m = (message or "").strip().lower()
+    if not m:
+        return False
+    keywords = ["preço", "preco", "valor", "custo", "quanto", "caro", "barato"]
+    if any(k in m for k in keywords):
+        return True
+    # Exemplos comuns: "quanto custa", "qual o preço"
+    return bool(re.search(r"\bquanto\s+custa\b|\bqual\s+o\s+pre[cç]o\b", m))
 
 
 def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = None) -> Dict[str, Any]:
@@ -169,7 +186,9 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
         "last_color": None,
         "last_environment": None,
         "last_room_type": None,
-        "last_age_context": None
+        "last_age_context": None,
+        # Ajuda a manter a conversa fluida (ex.: usuário responde "sim" / "pode")
+        "pending_action": None,
     })
     
     # Buscar cores disponíveis no banco (cache)
@@ -177,26 +196,96 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
         available_colors = PaintRepository.get_available_colors(db)
         state["available_colors"] = available_colors
 
+    def _is_affirmative(text: str) -> bool:
+        t = (text or "").strip().lower()
+        return t in {"sim", "s", "pode", "claro", "ok", "isso", "isso mesmo", "vamos", "manda"} or t.startswith("sim ")
+
+    def _is_negative(text: str) -> bool:
+        t = (text or "").strip().lower()
+        return t in {"não", "nao", "n", "negativo"} or t.startswith("não ") or t.startswith("nao ")
+
+    def _location_phrase() -> str:
+        """Frase curta para o local, sem duplicar 'Para para ...'."""
+        room = state.get("last_room_type")
+        if room == "quarto":
+            return "No quarto"
+        if room == "sala":
+            return "Na sala"
+        if room == "cozinha":
+            return "Na cozinha"
+        if room == "banheiro":
+            return "No banheiro"
+
+        env = state.get("last_environment")
+        if env == "interno":
+            return "Em ambientes internos"
+        if env == "externo":
+            return "Em áreas externas"
+        return "Para o seu projeto"
+
+    def _pick_near_color_options(missing_color: str) -> List[str]:
+        """Sugere até 2 cores existentes no catálogo como alternativa."""
+        colors = state.get("available_colors", []) or []
+        if not colors:
+            return []
+
+        def _first_match(keywords: List[str]) -> Optional[str]:
+            for c in colors:
+                hay = f"{c.get('color', '')} {c.get('color_display', '')}".lower()
+                if any(k in hay for k in keywords):
+                    return c.get("color_display") or c.get("color")
+            return None
+
+        options: List[str] = []
+        miss = (missing_color or "").lower()
+
+        if miss in {"roxo", "violeta", "lilás", "lilas"}:
+            for keys in [["azul", "marinho", "anil"], ["rosa", "magenta", "fucsia", "fúcsia"], ["vinho", "bordo", "bordô"], ["cinza", "grafite"]]:
+                pick = _first_match(keys)
+                if pick and pick not in options:
+                    options.append(pick)
+        elif miss in {"rosa"}:
+            for keys in [["pêssego", "pesego", "nude", "bege"], ["vermelho", "vinho"]]:
+                pick = _first_match(keys)
+                if pick and pick not in options:
+                    options.append(pick)
+
+        # Completar com as cores mais comuns, se ainda faltar opção
+        for c in colors:
+            if len(options) >= 2:
+                break
+            pick = c.get("color_display") or c.get("color")
+            if pick and pick not in options:
+                options.append(pick)
+
+        return options[:2]
+
+    def _set_pending_alternative_colors(missing_color: str, context_label: str):
+        options = _pick_near_color_options(missing_color)
+        state["pending_action"] = {
+            "type": "suggest_alternative_colors",
+            "missing_color": missing_color,
+            "context_label": context_label,
+            "options": options,
+        }
+
     def _paint_text(paint) -> str:
-        color_label = paint.color_name or paint.color or "cor variável"
+        color_label = paint.cor or "cor variável"
         features_text = ""
         if paint.features:
             features_list = [f.strip() for f in paint.features.split(",") if f.strip()]
             features_text = ", ".join(features_list[:2])
-        # Formato direto: nome, características principais, preço se houver
-        response = f"{paint.name} - {color_label}"
+        # Formato direto: nome, características principais
+        response = f"{paint.nome} - {color_label}"
         if features_text:
             response += f", {features_text}"
-        response += f", acabamento {paint.finish_type.value}"
-        if paint.price:
-            response += f". R$ {paint.price:.2f}"
+        response += f", acabamento {paint.acabamento.value}"
         return response
 
     def _match_score(paint, keywords: List[str]) -> int:
         haystack = " ".join([
             paint.features or "",
-            paint.description or "",
-            paint.name or "",
+            paint.nome or "",
         ]).lower()
         return sum(1 for keyword in keywords if keyword in haystack)
 
@@ -208,7 +297,7 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
         return filtered or paints_list
 
     def _is_wall_surface(paint) -> bool:
-        surface = (paint.surface_type or "").lower()
+        surface = (paint.tipo_parede or "").lower()
         if not surface:
             return True
         return any(term in surface for term in ["parede", "alvenaria", "reboco", "gesso"])
@@ -220,11 +309,10 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
         
         filtered = []
         for p in paints_list:
-            color_in_paint = (p.color_name or "").lower()
-            color_hex = (p.color or "").lower()
+            color_in_paint = (p.cor or "").lower()
             
-            # Verificar se a cor solicitada está no nome da cor ou descrição
-            if color in color_in_paint or color in color_hex:
+            # Verificar se a cor solicitada está no nome da cor
+            if color in color_in_paint:
                 filtered.append(p)
         
         # CRÍTICO: Retorna lista vazia se não encontrar, não a lista original
@@ -252,6 +340,80 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
             if any(var in text for var in variations):
                 return color_key
         return None
+
+    # Se o usuário está respondendo uma pergunta pendente (ex.: "sim" / "pode"), tratar aqui.
+    # (Importante: precisa vir depois das funções auxiliares acima.)
+    pending = state.get("pending_action")
+    if pending and pending.get("type") == "suggest_alternative_colors" and (_is_affirmative(message_lower) or _is_negative(message_lower)):
+        if _is_negative(message_lower):
+            state["pending_action"] = None
+            response = "Tudo bem. Você tem alguma outra cor em mente (ex.: azul, cinza, bege) ou prefere que eu sugira um tom neutro?"
+            return {
+                "response": response,
+                "tools_used": [],
+                "paints_mentioned": [],
+                "metadata": {
+                    "execution_time_ms": 0,
+                    "intermediate_steps_count": 0,
+                    "model": "fallback",
+                    "mode": "fallback"
+                }
+            }
+
+        # Affirmative: escolher a primeira opção e tentar recomendar um produto real
+        options = pending.get("options") or []
+        chosen_color = (options[0] if options else None)
+        alt_color = (options[1] if len(options) > 1 else None)
+
+        # Limpar estado pendente e destravar o filtro de cor
+        state["pending_action"] = None
+        state["last_color"] = (chosen_color or "").lower() if chosen_color else None
+
+        location = _location_phrase()
+        interior_paints = [p for p in paints if p.ambiente.value in ["Interno", "Interno/Externo"]]
+        interior_paints = [p for p in interior_paints if _is_wall_surface(p)] or interior_paints
+
+        candidates = interior_paints
+        if chosen_color:
+            filtered = _filter_by_color(candidates, chosen_color.lower())
+            if filtered:
+                candidates = filtered
+            elif alt_color:
+                state["last_color"] = alt_color.lower()
+                filtered2 = _filter_by_color(candidates, alt_color.lower())
+                if filtered2:
+                    candidates = filtered2
+
+        candidates = _filter_repeated(candidates)
+        if candidates:
+            paint = candidates[0]
+            paints_mentioned.append(paint.id)
+            response = f"{location}, eu sugiro a {_paint_text(paint)}. Você prefere um tom mais escuro ou mais claro?"
+        else:
+            # Se não achou nada nem com alternativas, não insistir em cor.
+            state["last_color"] = None
+            any_paints = _filter_repeated(interior_paints)
+            if any_paints:
+                paint = any_paints[0]
+                paints_mentioned.append(paint.id)
+                response = f"{location}, eu sugiro a {_paint_text(paint)}. Qual cor você quer priorizar?"
+            else:
+                response = "Entendi. Me diz se é ambiente interno ou externo e o tipo de superfície, que eu sugiro a melhor opção do catálogo."
+
+        if user_id and paints_mentioned:
+            state["last_paints"] = paints_mentioned[:4]
+
+        return {
+            "response": response,
+            "tools_used": [],
+            "paints_mentioned": paints_mentioned,
+            "metadata": {
+                "execution_time_ms": 0,
+                "intermediate_steps_count": 0,
+                "model": "fallback",
+                "mode": "fallback"
+            }
+        }
     
     # Detectar e armazenar contexto
     detected_color = _detect_color_preference(message_lower)
@@ -259,7 +421,7 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
         state["last_color"] = detected_color
     if any(word in message_lower for word in ["interno", "interna", "interior"]):
         state["last_environment"] = "interno"
-    if any(word in message_lower for word in ["externo", "externa", "exterior", "fachada", "muro"]):
+    if any(word in message_lower for word in ["externo", "externa", "exterior", "fachada", "muro", "varanda"]):
         state["last_environment"] = "externo"
     
     # Detectar tipo de ambiente específico
@@ -286,7 +448,7 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
         state["last_age_context"] = "adolescente"
 
     if not paints:
-        response = "Opa, parece que ainda não temos tintas cadastradas no sistema! Assim que tiver alguns produtos aqui, vou poder te ajudar a escolher a ideal. Volte em breve! 😊"
+        response = "Parece que ainda não temos tintas cadastradas no sistema. Assim que tiver produtos no catálogo, eu consigo te indicar a melhor opção."
         return {
             "response": response,
             "tools_used": [],
@@ -306,13 +468,11 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
     elif any(word in message_lower for word in ["catálogo", "catalogo", "listar", "todas", "disponíveis"]):
         response = f"Olha só, temos {len(paints)} opções no catálogo! Vou te mostrar algumas das principais:\n\n"
         for paint in paints[:5]:  # Reduzido para não sobrecarregar
-            response += f"**{paint.name} - {paint.color_name or 'Várias cores'}**\n"
-            response += f"Ideal para: {paint.environment.value} | Acabamento: {paint.finish_type.value}\n"
-            if paint.price:
-                response += f"R$ {paint.price:.2f}\n"
+            response += f"**{paint.nome} - {paint.cor or 'Várias cores'}**\n"
+            response += f"Ideal para: {paint.ambiente.value} | Acabamento: {paint.acabamento.value} | Linha: {paint.linha.value}\n"
             if paint.features:
                 features_short = paint.features.split(',')[0].strip()  # Só primeira feature
-                response += f"💡 {features_short}\n"
+                response += f"{features_short}\n"
             response += "\n"
             paints_mentioned.append(paint.id)
         if len(paints) > 5:
@@ -333,42 +493,91 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
             response = "Me conte qual cor você está pensando que vou buscar no catálogo."
     
     elif any(word in message_lower for word in ["tem rosa", "rosa", "rosado", "rosada", "pink"]):
+        # Se o usuário falou em fachada/muro/exterior, priorizar critérios técnicos (não só a cor)
+        is_exterior_request = (
+            state.get("last_environment") == "externo"
+            or any(word in message_lower for word in ["fachada", "muro", "exterior", "externo", "externa"])
+        )
+
         color_paints = [
             p for p in paints
-            if any(term in (p.color_name or "").lower() for term in ["rosa", "pink"])
-            or any(term in (p.color or "").lower() for term in ["rosa", "pink"])
+            if any(term in (p.cor or "").lower() for term in ["rosa", "pink"])
+            or any(term in (p.cor or "").lower() for term in ["rosa", "pink"])
         ]
-        if color_paints:
-            color_paints = _filter_repeated(color_paints)
-            paint = color_paints[0]
+
+        candidates = color_paints
+        if is_exterior_request:
+            # Fachada/muro: evitar recomendar produto de madeira e priorizar externo/ambos
+            candidates = [p for p in candidates if p.ambiente.value in ["Externo", "Interno/Externo"]] or candidates
+            candidates = [p for p in candidates if "madeira" not in (p.tipo_parede or "").lower()] or candidates
+            # Preferir parede/alvenaria quando possível
+            wall_candidates = [p for p in candidates if _is_wall_surface(p)]
+            candidates = wall_candidates or candidates
+
+        if candidates:
+            candidates = _filter_repeated(candidates)
+            paint = candidates[0]
             paints_mentioned.append(paint.id)
-            response = f"Sim! A {_paint_text(paint)}. É para ambiente interno ou externo?"
+            if is_exterior_request:
+                response = f"Para fachada em tom rosado, recomendo a {_paint_text(paint)}. Bate muito sol direto e pega chuva forte aí?"
+            else:
+                response = f"Sim! A {_paint_text(paint)}. É para ambiente interno ou externo?"
         else:
-            response = "No catálogo atual não encontrei rosa. Posso buscar tons próximos como pêssego ou nude?"
+            _set_pending_alternative_colors("rosa", state.get("last_room_type") or "ambiente")
+            options = state.get("pending_action", {}).get("options", [])
+            if len(options) >= 2:
+                response = f"No catálogo atual não encontrei rosa. Posso sugerir um tom de {options[0]} ou {options[1]} que fica próximo?"
+            elif len(options) == 1:
+                response = f"No catálogo atual não encontrei rosa. Posso sugerir um tom de {options[0]} que fica próximo?"
+            else:
+                response = "No catálogo atual não encontrei rosa. Posso sugerir cores próximas?"
 
     elif any(word in message_lower for word in ["tem roxo", "roxo", "roxa", "violeta", "lilás", "lilas"]):
+        is_exterior_request = (
+            state.get("last_environment") == "externo"
+            or any(word in message_lower for word in ["fachada", "muro", "exterior", "externo", "externa"])
+        )
+
         color_paints = [
             p for p in paints
-            if any(term in (p.color_name or "").lower() for term in ["roxo", "violeta", "lilás", "lilas"])
-            or any(term in (p.color or "").lower() for term in ["roxo", "violeta", "lilás", "lilas"])
+            if any(term in (p.cor or "").lower() for term in ["roxo", "violeta", "lilás", "lilas"])
+            or any(term in (p.cor or "").lower() for term in ["roxo", "violeta", "lilás", "lilas"])
         ]
-        if color_paints:
-            color_paints = _filter_repeated(color_paints)
-            paint = color_paints[0]
+
+        candidates = color_paints
+        if is_exterior_request:
+            candidates = [p for p in candidates if p.ambiente.value in ["Externo", "Interno/Externo"]] or candidates
+            candidates = [p for p in candidates if "madeira" not in (p.tipo_parede or "").lower()] or candidates
+            wall_candidates = [p for p in candidates if _is_wall_surface(p)]
+            candidates = wall_candidates or candidates
+
+        if candidates:
+            candidates = _filter_repeated(candidates)
+            paint = candidates[0]
             paints_mentioned.append(paint.id)
-            response = f"Sim! A {_paint_text(paint)}. É para ambiente interno ou externo?"
+            if is_exterior_request:
+                response = f"Para fachada, eu indicaria a {_paint_text(paint)}. Bate muito sol e chuva no local?"
+            else:
+                response = f"Sim! A {_paint_text(paint)}. É para ambiente interno ou externo?"
         else:
-            response = "No catálogo atual não encontrei roxo. Posso buscar tons próximos como azul profundo?"
+            _set_pending_alternative_colors("roxo", state.get("last_room_type") or "ambiente")
+            options = state.get("pending_action", {}).get("options", [])
+            if len(options) >= 2:
+                response = f"No catálogo atual não encontrei roxo. Posso sugerir um tom de {options[0]} ou {options[1]} que fica próximo?"
+            elif len(options) == 1:
+                response = f"No catálogo atual não encontrei roxo. Posso sugerir um tom de {options[0]} que fica próximo?"
+            else:
+                response = "No catálogo atual não encontrei roxo. Posso sugerir cores próximas?"
 
     elif any(word in message_lower for word in ["balada", "festa", "club", "clube", "boate"]):
-        interior_paints = [p for p in paints if p.environment.value in ["interno", "ambos"]]
+        interior_paints = [p for p in paints if p.ambiente.value in ["Interno", "Interno/Externo"]]
         interior_paints = [p for p in interior_paints if _is_wall_surface(p)] or interior_paints
         color_pref = state.get("last_color")
         if color_pref == "roxo":
             color_paints = [
                 p for p in interior_paints
-                if any(term in (p.color_name or "").lower() for term in ["roxo", "violeta", "lilás", "lilas"])
-                or any(term in (p.color or "").lower() for term in ["roxo", "violeta", "lilás", "lilas"])
+                if any(term in (p.cor or "").lower() for term in ["roxo", "violeta", "lilás", "lilas"])
+                or any(term in (p.cor or "").lower() for term in ["roxo", "violeta", "lilás", "lilas"])
             ]
             interior_paints = color_paints or interior_paints
         interior_paints = _filter_repeated(interior_paints)
@@ -380,7 +589,7 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
             response = "Me diz qual o tamanho do ambiente que ajusto a recomendação."
 
     elif any(word in message_lower for word in ["banheiro", "lavabo"]):
-        interior_paints = [p for p in paints if p.environment.value in ["interno", "ambos"]]
+        interior_paints = [p for p in paints if p.ambiente.value in ["Interno", "Interno/Externo"]]
         interior_paints = [p for p in interior_paints if _is_wall_surface(p)] or interior_paints
         keywords = ["lavável", "lavavel", "anti-mofo", "antimofo", "mofo", "umidade", "resistente"]
         scored = sorted(
@@ -401,7 +610,7 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
         any(word in message_lower for word in ["adolescente", "teen", "15 anos", "quinze", "15", "garoto", "menino", "filho", "filha", "criança", "anos"])
         or state.get("last_age_context")
     ):
-        interior_paints = [p for p in paints if p.environment.value in ["interno", "ambos"]]
+        interior_paints = [p for p in paints if p.ambiente.value in ["Interno", "Interno/Externo"]]
         interior_paints = [p for p in interior_paints if _is_wall_surface(p)] or interior_paints
         keywords = ["lavável", "lavavel", "resistente", "sem odor", "sem cheiro"]
         
@@ -414,7 +623,8 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
             else:
                 # Se não encontrou tintas na cor, informar
                 age_context = state.get("last_age_context") or "criança"
-                response = f"Não encontrei tintas na cor {color_pref} para quarto de {age_context}. Posso sugerir outras cores?"
+                _set_pending_alternative_colors(color_pref, f"quarto de {age_context}")
+                response = f"Não encontrei tintas na cor {color_pref} para quarto de {age_context}. Posso sugerir duas alternativas próximas?"
                 return {
                     "response": response,
                     "tools_used": [],
@@ -446,7 +656,7 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
             response = "Me conta se prefere algo mais neutro ou vibrante que ajusto a busca."
 
     elif any(word in message_lower for word in ["bebê", "bebe", "infantil"]):
-        interior_paints = [p for p in paints if p.environment.value in ["interno", "ambos"]]
+        interior_paints = [p for p in paints if p.ambiente.value in ["Interno", "Interno/Externo"]]
         interior_paints = [p for p in interior_paints if _is_wall_surface(p)] or interior_paints
         keywords = ["sem odor", "sem cheiro", "lavável", "lavavel", "anti-mofo", "antimofo"]
         
@@ -458,7 +668,8 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
                 interior_paints = color_filtered
             else:
                 # Se não encontrou tintas na cor, informar
-                response = f"Não encontrei tintas na cor {color_pref} para quartos infantis. Posso sugerir outras cores?"
+                _set_pending_alternative_colors(color_pref, "quartos infantis")
+                response = f"Não encontrei tintas na cor {color_pref} para quartos infantis. Posso sugerir duas alternativas próximas?"
                 return {
                     "response": response,
                     "tools_used": [],
@@ -487,7 +698,7 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
             response = "Me conta qual cor você está pensando que ajusto a busca."
 
     elif any(word in message_lower for word in ["interno", "interna", "quarto", "sala", "interior", "escritório"]):
-        interior_paints = [p for p in paints if p.environment.value in ["interno", "ambos"]]
+        interior_paints = [p for p in paints if p.ambiente.value in ["Interno", "Interno/Externo"]]
         interior_paints = [p for p in interior_paints if _is_wall_surface(p)] or interior_paints
         
         # CRÍTICO: Sempre filtrar por cor se foi mencionada
@@ -499,7 +710,8 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
             else:
                 # Se não encontrou tintas na cor, informar
                 context_desc = state.get("last_room_type") or "ambiente interno"
-                response = f"Não encontrei tintas na cor {color_pref} para {context_desc}. Posso sugerir outras cores?"
+                _set_pending_alternative_colors(color_pref, context_desc)
+                response = f"Não encontrei tintas na cor {color_pref} para {context_desc}. Posso sugerir duas alternativas próximas?"
                 return {
                     "response": response,
                     "tools_used": [],
@@ -518,42 +730,58 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
             paints_mentioned.append(paint.id)
             
             # Construir descrição com contexto
-            context_desc = ""
-            if state.get("last_room_type"):
-                context_desc = f"para {state['last_room_type']}"
-            elif state.get("last_age_context"):
-                context_desc = f"para ambiente infantil ({state['last_age_context']})"
-            else:
-                context_desc = "para ambientes internos"
+            location = _location_phrase()
             
             color_desc = f" na cor {color_pref}" if color_pref else ""
-            response = f"Para {context_desc}{color_desc}, recomendo a {_paint_text(paint)}. Você prefere acabamento fosco ou acetinado?"
+            response = f"{location}{color_desc}, recomendo a {_paint_text(paint)}. Você prefere acabamento fosco ou acetinado?"
         else:
             response = "Me conta mais sobre o ambiente que ajusto a recomendação."
     
     elif any(word in message_lower for word in ["externo", "externa", "fachada", "exterior", "muro", "varanda"]):
-        exterior_paints = [p for p in paints if p.environment.value in ["externo", "ambos"]]
+        exterior_paints = [p for p in paints if p.ambiente.value in ["Externo", "Interno/Externo"]]
+        
+        # IMPORTANTE: Considerar a cor que o usuário pediu
+        color_pref = state.get("last_color") or _detect_color_preference(message_lower)
+        if color_pref:
+            color_matches = _filter_by_color(exterior_paints, color_pref)
+            if color_matches:
+                exterior_paints = color_matches
+            else:
+                # Não tem a cor pedida para externo
+                if exterior_paints:
+                    alt_paint = exterior_paints[0]
+                    paints_mentioned.append(alt_paint.id)
+                    response = f"Não encontrei tinta {color_pref} para área externa no catálogo. A opção mais próxima é {_paint_text(alt_paint)}. Quer que eu busque outra cor?"
+                else:
+                    response = f"Não encontrei tinta {color_pref} para área externa. Qual outra cor você gostaria?"
+                return {
+                    "response": response,
+                    "tools_used": [],
+                    "paints_mentioned": paints_mentioned,
+                    "metadata": {"execution_time_ms": 0, "mode": "fallback"}
+                }
+        
         if exterior_paints:
             exterior_paints = _filter_repeated(exterior_paints)
             paint = exterior_paints[0]
             paints_mentioned.append(paint.id)
-            response = f"Para áreas externas, recomendo a {_paint_text(paint)}. Bate muito sol direto no local?"
+            color_desc = f" na cor {paint.cor}" if paint.cor else ""
+            response = f"Para áreas externas{color_desc}, recomendo a {_paint_text(paint)}. Bate muito sol direto no local?"
         else:
             response = "Me conta se é fachada ou muro que ajusto a recomendação."
     
     elif any(word in message_lower for word in ["preço", "preco", "valor", "custo", "quanto"]):
-        response = "Aqui estão alguns preços do catálogo:\n\n"
+        response = "Aqui estão as tintas disponíveis no catálogo:\n\n"
         for paint in paints:
-            if paint.price:
-                response += f"• **{paint.name} - {paint.color_name or 'Cor variável'}**: R$ {paint.price:.2f}\n"
-                paints_mentioned.append(paint.id)
+            response += f"• **{paint.nome} - {paint.cor or 'Cor variável'}** ({paint.linha.value})\n"
+            paints_mentioned.append(paint.id)
     
     elif any(word in message_lower for word in ["lavável", "lavavel", "limpar", "limpeza"]):
         lavavel_paints = [p for p in paints if p.features and "lavável" in p.features.lower()]
         if lavavel_paints:
             response = "**Tintas Laváveis:**\n\n"
             for paint in lavavel_paints[:3]:
-                response += f"• **{paint.name}** - {paint.color_name or 'Várias cores'}\n"
+                response += f"• **{paint.nome}** - {paint.cor or 'Várias cores'}\n"
                 response += f"  {paint.features}\n\n"
                 paints_mentioned.append(paint.id)
         else:
@@ -565,7 +793,7 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
         
         # Se tem contexto de ambiente
         if state.get("last_room_type"):
-            context_parts.append(f"para {state['last_room_type']}")
+            context_parts.append(_location_phrase().lower())
         elif state.get("last_environment"):
             context_parts.append(f"para ambiente {state['last_environment']}")
         
@@ -576,7 +804,7 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
         if context_parts:
             # Tem contexto anterior - buscar com esse contexto
             context_query = " ".join(context_parts) + " " + message_lower
-            interior_paints = [p for p in paints if p.environment.value in ["interno", "ambos"]]
+            interior_paints = [p for p in paints if p.ambiente.value in ["Interno", "Interno/Externo"]]
             
             # CRÍTICO: Sempre filtrar por cor se foi mencionada
             color_pref = state.get("last_color")
@@ -587,7 +815,8 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
                 else:
                     # Se não encontrou tintas na cor, informar
                     context_desc = " ".join(context_parts)
-                    response = f"Para {context_desc}, não encontrei tintas na cor {color_pref}. Posso sugerir outras cores?"
+                    _set_pending_alternative_colors(color_pref, context_desc)
+                    response = f"{context_desc.capitalize()}, não encontrei tintas na cor {color_pref}. Posso sugerir duas alternativas próximas?"
                     return {
                         "response": response,
                         "tools_used": [],
@@ -614,7 +843,7 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
                 paints_mentioned.append(paint.id)
                 context_desc = " ".join(context_parts)
                 color_desc = f" na cor {color_pref}" if color_pref else ""
-                response = f"Para {context_desc}{color_desc}, recomendo a {_paint_text(paint)}. É isso que você procura?"
+                response = f"{context_desc.capitalize()}{color_desc}, recomendo a {_paint_text(paint)}. É isso que você procura?"
             else:
                 response = f"Entendi que é {' '.join(context_parts)}. Me conta mais sobre o que você procura (cor, acabamento, características)?"
         else:
@@ -637,21 +866,22 @@ def _simple_chat_response(message: str, db: Session, user_id: Optional[int] = No
     }
 
 
-def get_orchestrator_service(user_id: int, db: Session, reset: bool = False):
-    """Obtém ou cria serviço de orquestrador para o usuário"""
+def get_orchestrator_service(session_key: Any, db: Session, reset: bool = False):
+    """Obtém ou cria serviço de orquestrador para o usuário/sessão"""
     if not _is_openai_configured():
         return None
     
     # Importar apenas se OpenAI estiver configurada
     from app.ai.orchestrator import OrchestratorAgent
     
-    if reset or user_id not in _orchestrator_sessions:
+    if reset or session_key not in _orchestrator_sessions:
         try:
-            _orchestrator_sessions[user_id] = OrchestratorAgent(db, user_id=user_id)
+            # user_id pode ser None (usuário anônimo); session_key garante isolamento de memória
+            _orchestrator_sessions[session_key] = OrchestratorAgent(db, user_id=(session_key if isinstance(session_key, int) else None))
         except Exception as e:
             print(f"Erro ao criar OrchestratorAgent: {e}")
             return None
-    return _orchestrator_sessions[user_id]
+    return _orchestrator_sessions[session_key]
 
 
 def get_agent_service(user_id: int, db: Session, reset: bool = False):
@@ -660,7 +890,11 @@ def get_agent_service(user_id: int, db: Session, reset: bool = False):
         return None
     
     # Importar apenas se OpenAI estiver configurada
-    from app.ai.agent_service import AgentService
+    try:
+        from app.ai.agent_service import AgentService
+    except ModuleNotFoundError:
+        # Código legado removido/renomeado em refactors; manter endpoint estável
+        return None
     
     if reset or user_id not in _agent_sessions:
         try:
@@ -706,15 +940,36 @@ e combina suas recomendações para fornecer a melhor resposta.
 )
 async def chat(
     chat_message: ChatMessageRequest,
-    current_user: dict = Depends(get_current_active_user),
+    request: Request,
+    current_user: Optional[dict] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
     """Endpoint principal de chat com Sistema Multi-Agentes"""
     
+    # Usar ID None para usuários anônimos (mas isolar a memória por sessão)
+    user_id = current_user["id"] if current_user else None
+    if user_id is None:
+        ua = (request.headers.get("user-agent") or "").encode("utf-8")
+        ua_hash = hashlib.sha256(ua).hexdigest()[:10]
+        client_host = getattr(getattr(request, "client", None), "host", "unknown")
+        session_key: Any = f"anon:{client_host}:{ua_hash}"
+    else:
+        session_key = user_id
+
+    # Preço: responder direto do catálogo (sem IA), mesmo com OpenAI configurada.
+    if _is_price_query(chat_message.message):
+        result = _simple_chat_response(chat_message.message, db, user_id=session_key)
+        return ChatResponse(
+            response=result["response"],
+            tools_used=[ToolUsage(**t) for t in result["tools_used"]],
+            paints_mentioned=result["paints_mentioned"],
+            metadata=ChatMetadata(**result["metadata"])
+        )
+    
     # Verificar se OpenAI está configurada
     if not _is_openai_configured():
         # Usar modo simples sem IA
-        result = _simple_chat_response(chat_message.message, db, user_id=current_user["id"])
+        result = _simple_chat_response(chat_message.message, db, user_id=session_key)
         return ChatResponse(
             response=result["response"],
             tools_used=[ToolUsage(**t) for t in result["tools_used"]],
@@ -724,14 +979,14 @@ async def chat(
     
     # Modo com Orquestrador Multi-Agentes
     orchestrator = get_orchestrator_service(
-        current_user["id"],
+        session_key,
         db,
         reset=chat_message.reset_conversation,
     )
     
     if orchestrator is None:
         # Fallback para modo simples se houver erro ao criar orquestrador
-        result = _simple_chat_response(chat_message.message, db, user_id=current_user["id"])
+        result = _simple_chat_response(chat_message.message, db, user_id=session_key)
         return ChatResponse(
             response=result["response"],
             tools_used=[ToolUsage(**t) for t in result["tools_used"]],
@@ -776,7 +1031,7 @@ async def chat(
         
         response = ChatResponse(
             response=result.get("response", ""),
-            tools_used=[],  # Orquestrador usa especialistas, não tools
+            tools_used=[ToolUsage(**t) for t in result.get("tools_used", [])],
             paints_mentioned=result.get("paints_mentioned", []),
             metadata=metadata
         )
@@ -793,7 +1048,7 @@ async def chat(
         import traceback
         traceback.print_exc()
         
-        result = _simple_chat_response(chat_message.message, db, user_id=current_user["id"])
+        result = _simple_chat_response(chat_message.message, db, user_id=session_key)
         return ChatResponse(
             response=result["response"],
             tools_used=[ToolUsage(**t) for t in result["tools_used"]],
@@ -1025,11 +1280,10 @@ async def generate_visualization(
             if paint:
                 paint_info = {
                     "id": paint.id,
-                    "name": paint.name,
-                    "color": paint.color_name or paint.color,
-                    "finish": paint.finish_type.value,
-                    "line": paint.line.value,
-                    "price": paint.price,
+                    "nome": paint.nome,
+                    "cor": paint.cor,
+                    "acabamento": paint.acabamento.value,
+                    "linha": paint.linha.value,
                     "features": paint.features
                 }
         
