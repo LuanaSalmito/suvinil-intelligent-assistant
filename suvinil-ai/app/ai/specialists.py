@@ -304,10 +304,16 @@ class ColorAndFinishSpecialist(BaseSpecialist):
     def can_handle(self, query: str, context: Dict[str, Any]) -> bool:
         """Verifica se é uma consulta sobre cores ou acabamentos"""
         query_lower = query.lower()
+        
+        # Se cor foi mencionada na mensagem, SEMPRE pode lidar
+        if context.get("color_from_message"):
+            return True
+        
+        # Palavras-chave de cores
         color_keywords = [
             "cor", "cores", "tom", "tonalidade", "azul", "verde", "vermelho",
-            "amarelo", "branco", "cinza", "rosa", "roxo", "laranja",
-            "acabamento", "fosco", "brilhante", "acetinado"
+            "amarelo", "branco", "cinza", "rosa", "roxo", "roxa", "laranja",
+            "acabamento", "fosco", "brilhante", "acetinado", "tem"
         ]
         return any(keyword in query_lower for keyword in color_keywords)
     
@@ -315,9 +321,11 @@ class ColorAndFinishSpecialist(BaseSpecialist):
         """Consulta especializada em cores e acabamentos"""
         logger.info(f"[{self.name}] Consultando para: {query[:50]}...")
         
-        # Detectar cor solicitada
-        color = context.get("color") or self._detect_color(query)
+        # Detectar cor solicitada - PRIORIDADE para cor na mensagem atual
+        color = context.get("color_from_message") or context.get("color") or self._detect_color(query)
         finish = context.get("finish_type")
+        
+        logger.info(f"[{self.name}] Cor detectada: {color}, Acabamento: {finish}")
         
         if not color and not finish:
             # Listar cores disponíveis
@@ -330,14 +338,35 @@ class ColorAndFinishSpecialist(BaseSpecialist):
                 "available_colors": colors[:15]
             }
         
-        # Buscar tintas pela cor
-        filters = {"limit": 15}
+        # Buscar tintas pela cor usando o método específico de cor
         if color:
-            filters["color"] = color
-        if finish:
-            filters["finish_type"] = finish
+            paints = PaintRepository.find_by_color(
+                self.db,
+                color=color,
+                environment=context.get("environment"),
+                finish_type=finish,
+                limit=15
+            )
+            logger.info(f"[{self.name}] Encontradas {len(paints)} tintas na cor {color}")
+        else:
+            # Se não tem cor, usar busca geral
+            filters = {"limit": 15}
+            if finish:
+                filters["finish_type"] = finish
+            paints = PaintRepository.search(self.db, **filters)
         
-        paints = PaintRepository.search(self.db, **filters)
+        # Se não encontrou tintas na cor solicitada
+        if not paints and color:
+            colors = PaintRepository.get_available_colors(self.db)
+            colors_list = ", ".join([c["color_display"] for c in colors[:8]])
+            return {
+                "specialist": self.name,
+                "recommendations": [],
+                "reasoning": f"Não encontrei tintas na cor {color} no catálogo.",
+                "confidence": 0.0,
+                "available_colors": colors,
+                "suggestion": f"Cores disponíveis: {colors_list}"
+            }
         
         recommendations = []
         for paint in paints[:5]:
@@ -357,6 +386,7 @@ class ColorAndFinishSpecialist(BaseSpecialist):
             reasoning += f" na cor {color}"
         if finish:
             reasoning += f" com acabamento {finish}"
+        reasoning += f". Encontradas {len(paints)} opções."
         
         return {
             "specialist": self.name,

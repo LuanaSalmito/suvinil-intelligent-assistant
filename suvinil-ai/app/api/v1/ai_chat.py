@@ -11,6 +11,7 @@ com suporte a:
 - Observabilidade completa do raciocínio
 """
 import re
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
@@ -24,6 +25,8 @@ from app.repositories.paint_repository import PaintRepository
 from app.ai.rag_service import RAGService
 from app.ai.image_generator import ImageGenerator
 from app.models.chat_message import ChatMessage
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -86,6 +89,7 @@ class ChatResponse(BaseModel):
     tools_used: List[ToolUsage] = Field(default_factory=list, description="Ferramentas utilizadas pelo agente")
     paints_mentioned: List[int] = Field(default_factory=list, description="IDs das tintas mencionadas")
     metadata: ChatMetadata = Field(..., description="Metadados da execução")
+    image_url: Optional[str] = Field(None, description="URL da imagem gerada (quando visualização é solicitada)")
     
     class Config:
         json_schema_extra = {
@@ -96,8 +100,8 @@ class ChatResponse(BaseModel):
                 "metadata": {
                     "execution_time_ms": 1523.5,
                     "intermediate_steps_count": 2,
-                    "model": "gpt-4o-mini",
-                    "mode": "ai"
+                    "model": "gpt-4",
+                    "mode": "orchestrator"
                 }
             }
         }
@@ -751,8 +755,8 @@ async def chat(
         orchestrator.reset_memory()
     
     try:
-        # Executar orquestrador
-        result = orchestrator.chat(chat_message.message)
+        # Executar orquestrador (agora é async)
+        result = await orchestrator.chat(chat_message.message)
         
         # Converter specialists_consulted para schema
         specialists_consulted = [
@@ -782,12 +786,18 @@ async def chat(
             reasoning_chain=reasoning_chain
         )
         
-        return ChatResponse(
+        response = ChatResponse(
             response=result.get("response", ""),
             tools_used=[],  # Orquestrador usa especialistas, não tools
             paints_mentioned=result.get("paints_mentioned", []),
             metadata=metadata
         )
+        
+        # Se gerou imagem, adicionar ao response (extensão do schema)
+        if "image_url" in result:
+            response.image_url = result["image_url"]
+        
+        return response
         
     except Exception as e:
         # Em caso de erro no orquestrador, usar modo simples
