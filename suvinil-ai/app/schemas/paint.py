@@ -1,21 +1,18 @@
 """Schemas de Tinta"""
 from pydantic import BaseModel
 from typing import Optional
-from app.models.paint import Environment, FinishType, PaintLine
+from app.models.paint import Ambiente, Acabamento, Linha
 
 
 class PaintBase(BaseModel):
     """Schema base de tinta"""
-    name: str
-    color: Optional[str] = None
-    color_name: Optional[str] = None
-    surface_type: Optional[str] = None
-    environment: Environment
-    finish_type: FinishType
+    nome: str
+    cor: Optional[str] = None
+    tipo_parede: Optional[str] = None
+    ambiente: Ambiente
+    acabamento: Acabamento
     features: Optional[str] = None
-    line: PaintLine
-    price: Optional[float] = None
-    description: Optional[str] = None
+    linha: Linha
 
 
 class PaintCreate(PaintBase):
@@ -25,16 +22,13 @@ class PaintCreate(PaintBase):
 
 class PaintUpdate(BaseModel):
     """Schema para atualização de tinta"""
-    name: Optional[str] = None
-    color: Optional[str] = None
-    color_name: Optional[str] = None
-    surface_type: Optional[str] = None
-    environment: Optional[Environment] = None
-    finish_type: Optional[FinishType] = None
+    nome: Optional[str] = None
+    cor: Optional[str] = None
+    tipo_parede: Optional[str] = None
+    ambiente: Optional[Ambiente] = None
+    acabamento: Optional[Acabamento] = None
     features: Optional[str] = None
-    line: Optional[PaintLine] = None
-    price: Optional[float] = None
-    description: Optional[str] = None
+    linha: Optional[Linha] = None
     is_active: Optional[bool] = None
 
 

@@ -2,8 +2,9 @@
 Suvinil AI - Catálogo Inteligente de Tintas
 Main entry point da aplicação FastAPI
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
@@ -29,14 +30,27 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS
+# CORS - DEVE ser adicionado PRIMEIRO
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Em produção, especificar domínios
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+
+# Handler global de exceções para garantir CORS em erros
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": str(exc),
+            "error_type": type(exc).__name__
+        }
+    )
 
 # Routers
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])

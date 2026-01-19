@@ -1,4 +1,5 @@
 """Configurações da aplicação"""
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from typing import Optional
 
@@ -16,13 +17,17 @@ class Settings(BaseSettings):
     
     # OpenAI
     OPENAI_API_KEY: Optional[str] = None
+    OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     
     # Application
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
     
     class Config:
-        env_file = ".env"
+        # Sempre carregar o .env do diretório `suvinil-ai/`, mesmo se o uvicorn
+        # for iniciado a partir da raiz do repositório.
+        env_file = str(Path(__file__).resolve().parents[2] / ".env")
         case_sensitive = True
 
 
