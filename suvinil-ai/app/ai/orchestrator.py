@@ -56,12 +56,122 @@ class OrchestratorAgent:
         - Máximo de 4 frases curtas e impactantes.
         - NUNCA use emojis.
         - Sugira apenas 1 produto (o melhor para o caso).
-        - Termine com uma pergunta consultiva que demonstre interesse no projeto.
+        - NÃO termine com perguntas. Só faça perguntas quando for estritamente necessário para destravar a recomendação.
         """
 
     def reset_memory(self):
         self.conversation_memory = []
         self.slot_memory = PaintContext()
+
+    def _is_follow_up(self, text: str) -> bool:
+        """
+        Heurística: follow-up tende a ser curto e referir-se ao que já foi dito
+        (ex.: "e fosco ou acetinado?", "pode ser", "e na cor azul?").
+        Para mensagens de "novo pedido" (ex.: "quero pintar meu escritório de cinza"),
+        NÃO devemos herdar slots antigos (evita 'vazar' madeira/externo de outra conversa).
+        """
+        t = (text or "").strip().lower()
+        if not t:
+            return True
+        # Mensagens muito curtas geralmente são continuação
+        if len(t) <= 28:
+            return True
+        followup_starters = ("e ", "e se", "e na", "e no", "e para", "e quanto", "ok", "sim", "isso", "pode", "pode ser")
+        if t.startswith(followup_starters):
+            return True
+        # Perguntas sobre acabamento/cor sem "pintar X" costumam ser refinamento
+        if any(k in t for k in ["fosco", "acetinado", "brilhante"]) and "pintar" not in t:
+            return True
+        return False
+
+    def _infer_room_context(self, text: str) -> PaintContext:
+        """
+        Inferências leves para evitar travar em perguntas óbvias.
+        Ex.: "escritório/quarto/sala" -> ambiente interno e superfície parede (se não houver outra).
+        """
+        t = (text or "").lower()
+        if not t:
+            return PaintContext()
+        # Se falar em madeira/metal explicitamente, não inferir parede.
+        if any(k in t for k in ["madeira", "mdf", "compensado", "laminado", "metal", "ferro", "aço", "aco", "alum", "inox"]):
+            return PaintContext()
+        # Ambientes externos típicos (o usuário nem sempre diz "externo")
+        if any(k in t for k in ["fachada", "muro", "área externa", "area externa", "exterior", "varanda", "quintal", "jardim"]):
+            return PaintContext(environment="externo", surface_type="parede")
+        if any(k in t for k in ["escritório", "escritorio", "quarto", "sala", "cozinha", "banheiro", "lavabo"]):
+            return PaintContext(environment="interno", surface_type="parede")
+        return PaintContext()
+
+    def _normalize_surface_type(self, surface_type: Optional[str], user_input: str = "") -> Optional[str]:
+        """
+        Normaliza termos que o usuário usa como "local" (ex.: 'fachada', 'muro')
+        para uma superfície que existe no nosso catálogo (ex.: 'parede').
+        Motivo: `PaintRepository.recommend_candidates` filtra por `tipo_parede`,
+        então 'fachada' tende a zerar candidatos mesmo havendo tintas externas.
+        """
+        raw = (surface_type or "").strip().lower()
+        t = ((user_input or "") + " " + (surface_type or "")).lower()
+        if not raw and not t:
+            return surface_type
+
+        # "fachada/muro" são locais; no catálogo normalmente isso é "parede/alvenaria"
+        if any(k in t for k in ["fachada", "muro", "parede externa", "parede de fora", "exterior da casa"]):
+            return "parede"
+
+        # Normalizações leves
+        if "parede" in t:
+            return "parede"
+
+        return surface_type
+
+    def _extract_feature_intents(self, text: str) -> List[str]:
+        """
+        Extrai intenções técnicas a partir do texto do usuário para priorizar
+        tintas cujo campo `features` contenha os requisitos (lavável/anti-mofo/etc).
+        Retorna uma lista de "intents" normalizados.
+        """
+        t = (text or "").strip().lower()
+        if not t:
+            return []
+
+        intents: List[str] = []
+        if any(k in t for k in ["lavável", "lavavel", "limpar", "limpeza"]):
+            intents.append("lavavel")
+        if any(k in t for k in ["mofo", "antimofo", "anti-mofo", "umidade", "umidade"]):
+            intents.append("antimofo")
+        if any(k in t for k in ["sem cheiro", "sem odor", "baixo odor", "pouco cheiro"]):
+            intents.append("sem_odor")
+        if any(k in t for k in ["alta cobertura", "cobre bem", "boa cobertura", "rende"]):
+            intents.append("cobertura")
+        if any(k in t for k in ["resistente", "durável", "duravel", "não descasca", "nao descasca"]):
+            intents.append("resistencia")
+        if any(k in t for k in ["sol", "uv", "chuva", "tempo", "intempérie", "intemperie"]):
+            intents.append("clima")
+        return intents
+
+    def _score_paint_by_intents(self, paint: Any, intents: List[str]) -> int:
+        if not paint or not intents:
+            return 0
+        hay = " ".join([
+            getattr(paint, "features", "") or "",
+            getattr(paint, "nome", "") or "",
+        ]).lower()
+
+        intent_terms = {
+            "lavavel": ["lavável", "lavavel", "limp"],
+            "antimofo": ["anti-mofo", "antimofo", "mofo", "umidade"],
+            "sem_odor": ["sem odor", "sem cheiro", "baixo odor", "pouco cheiro"],
+            "cobertura": ["cobertura", "rende", "rendimento"],
+            "resistencia": ["resistente", "durável", "duravel", "proteção", "protecao"],
+            "clima": ["uv", "sol", "chuva", "tempo", "intemper"],
+        }
+
+        score = 0
+        for intent in intents:
+            terms = intent_terms.get(intent) or []
+            if any(term in hay for term in terms):
+                score += 1
+        return score
 
     def _is_price_query(self, text: str) -> bool:
         """
@@ -110,13 +220,54 @@ class OrchestratorAgent:
         self.conversation_memory.append({"role": "user", "content": user_input})
         
         # 1. Extração de Contexto (Slots)
-        context = self._extract_context(user_input, self.conversation_memory, self.slot_memory)
-        # Merge de slots: mantém memória do que já foi definido antes
+        is_follow_up = self._is_follow_up(user_input)
+        # Se não é follow-up, evite usar histórico/slots antigos na extração (reduz "vazamento" de contexto).
+        extraction_history = self.conversation_memory if is_follow_up else [{"role": "user", "content": user_input}]
+        slots_for_extraction = self.slot_memory if is_follow_up else PaintContext()
+        context = self._extract_context(user_input, extraction_history, slots_for_extraction)
+
+        if is_follow_up:
+            # Merge de slots: mantém memória do que já foi definido antes
+            merged = PaintContext(
+                environment=context.environment or self.slot_memory.environment,
+                surface_type=context.surface_type or self.slot_memory.surface_type,
+                color=context.color or self.slot_memory.color,
+                finish_type=context.finish_type or self.slot_memory.finish_type,
+            )
+        else:
+            # Novo pedido: usar o que o usuário trouxe AGORA (sem herdar madeira/etc.).
+            merged = PaintContext(
+                environment=context.environment,
+                surface_type=context.surface_type,
+                color=context.color,
+                finish_type=context.finish_type,
+            )
+            # Inferir interno/parede para ambientes típicos (ex.: escritório), se ainda estiver faltando.
+            inferred = self._infer_room_context(user_input)
+            merged = PaintContext(
+                environment=merged.environment or inferred.environment,
+                surface_type=merged.surface_type or inferred.surface_type,
+                color=merged.color,
+                finish_type=merged.finish_type,
+            )
+
+        # Inferência adicional segura (só preenche o que estiver faltando).
+        # Ex.: "fachada" -> externo, "quarto" -> interno.
+        inferred2 = self._infer_room_context(user_input)
         merged = PaintContext(
-            environment=context.environment or self.slot_memory.environment,
-            surface_type=context.surface_type or self.slot_memory.surface_type,
-            color=context.color or self.slot_memory.color,
-            finish_type=context.finish_type or self.slot_memory.finish_type,
+            environment=merged.environment or inferred2.environment,
+            surface_type=merged.surface_type or inferred2.surface_type,
+            color=merged.color,
+            finish_type=merged.finish_type,
+        )
+
+        # Normalização de superfície (ex.: "fachada" -> "parede") antes de consultar DB/RAG.
+        normalized_surface = self._normalize_surface_type(merged.surface_type, user_input=user_input)
+        merged = PaintContext(
+            environment=merged.environment,
+            surface_type=normalized_surface,
+            color=merged.color,
+            finish_type=merged.finish_type,
         )
         self.slot_memory = merged
         context_dict = merged.dict()
@@ -130,8 +281,13 @@ class OrchestratorAgent:
         
         # 2. Verificação de Slots Críticos (Fluxo de Diálogo)
         missing = self._get_missing_slots(merged)
-        # Se não tem nem ambiente nem cor, perguntar o mínimo (evita loop)
-        if not merged.environment and not merged.color:
+        # Só interromper para perguntar quando NÃO há pistas suficientes para recomendar.
+        # Ex.: "qual tinta você indica?" (sem ambiente, sem superfície, sem cor).
+        #
+        # Importante: se o usuário já trouxe uma pista forte (ex.: "madeira", "metal"),
+        # NÃO devemos travar perguntando ambiente; os especialistas conseguem recomendar
+        # mesmo com ambiente indefinido, e a pergunta pode vir no final para refinamento.
+        if not merged.environment and not merged.surface_type and not merged.color:
             response = self._ask_for_missing(missing)
             self.conversation_memory.append({"role": "assistant", "content": response})
             return {
@@ -157,12 +313,16 @@ class OrchestratorAgent:
         tools_used.append({"tool": "db_specialists_scan", "input": "PaintRepository.get_all(limit=150)"})
         
         # 4. Síntese do Produto (Melhor Escolha)
+        feature_intents = self._extract_feature_intents(user_input)
         all_paints = []
         for rec in specialist_recommendations:
             all_paints.extend(rec.recommended_paints)
         
         seen_ids = set()
         unique_paints = [p for p in all_paints if not (p.id in seen_ids or seen_ids.add(p.id))]
+        if feature_intents and unique_paints:
+            unique_paints.sort(key=lambda p: self._score_paint_by_intents(p, feature_intents), reverse=True)
+            tools_used.append({"tool": "feature_intent_rank", "input": f"intents={feature_intents}"})
         best_paint = unique_paints[0] if unique_paints else None
 
         # Fallback de produto: se especialistas não retornarem tinta, usar RAG para apontar um item do catálogo.
@@ -189,6 +349,65 @@ class OrchestratorAgent:
             except Exception as e:
                 logger.warning(f"Falha ao usar RAG como fallback de produto: {e}")
 
+        # Se ainda não há produto, NÃO chamar LLM (evita alucinação de catálogo).
+        # Responder de forma determinística e consultiva, pedindo o mínimo necessário
+        # para encontrar um item real no banco.
+        if best_paint is None:
+            missing_now = self._get_missing_slots(merged)
+            if not merged.environment:
+                response_text = self._ask_for_missing(missing_now)
+            else:
+                env_label = merged.environment
+                surf = (merged.surface_type or "").strip().lower()
+                cor = (merged.color or "").strip().lower()
+
+                # Nunca assumir "madeira" (isso estava puxando respostas erradas).
+                if not surf:
+                    cor_hint = f" na cor {cor}" if cor else ""
+                    response_text = (
+                        f"No catálogo atual, não encontrei uma tinta cadastrada com esses critérios para ambiente {env_label}{cor_hint}. "
+                        f"Você vai pintar **parede**, **madeira** ou **metal**?"
+                    )
+                elif any(k in surf for k in ["madeira", "mdf", "compens", "laminad"]):
+                    # Madeira: pergunta certa depende do ambiente
+                    if env_label == "externo":
+                        response_text = (
+                            "No catálogo atual, não encontrei uma tinta cadastrada especificamente para madeira em área externa. "
+                            "A madeira é crua ou já tem verniz/tinta, e pega sol/chuva diretamente?"
+                        )
+                    else:
+                        response_text = (
+                            "No catálogo atual, não encontrei uma tinta cadastrada especificamente para madeira em ambiente interno. "
+                            "A madeira é crua ou já tem verniz/tinta, e você quer acabamento fosco ou acetinado?"
+                        )
+                elif any(k in surf for k in ["metal", "ferro", "aço", "aco", "alum", "inox"]):
+                    response_text = (
+                        f"No catálogo atual, não encontrei uma tinta cadastrada especificamente para {merged.surface_type} em ambiente {env_label}. "
+                        "É metal novo ou já pintado (com ferrugem/descascando)?"
+                    )
+                else:
+                    # Parede/alvenaria/etc.
+                    cor_hint = f" na cor {cor}" if cor else ""
+                    response_text = (
+                        f"No catálogo atual, não encontrei uma tinta cadastrada especificamente para {merged.surface_type} em ambiente {env_label}{cor_hint}. "
+                        "A parede é gesso/massa corrida ou reboco, e você prefere fosco ou acetinado?"
+                    )
+
+            tools_used.append({
+                "tool": "db_catalog_no_match",
+                "input": f"environment={merged.environment} surface_type={merged.surface_type} color={merged.color} finish_type={merged.finish_type}"
+            })
+            self.conversation_memory.append({"role": "assistant", "content": response_text})
+            return {
+                "response": response_text,
+                "context": context_dict,
+                "paints_mentioned": [],
+                "tools_used": tools_used,
+                "specialists_consulted": [{"specialist": r.specialist_name, "confidence": r.confidence} for r in specialist_recommendations],
+                "reasoning_chain": [r.to_dict() for r in specialist_recommendations],
+                "metadata": {"execution_time_ms": (time.time() - start_time) * 1000},
+            }
+
         # 5. Prompt de Síntese Final (O Coração da Humanização)
         specialist_insights = "\n".join([f"- {r.specialist_name}: {r.reasoning}" for r in specialist_recommendations])
         
@@ -213,6 +432,8 @@ class OrchestratorAgent:
             
             TAREFA: Como um consultor, gere uma resposta que conecte o produto à necessidade do usuário. 
             Se ele escolheu uma cor, valide a escolha. Não liste dados, narre a solução.
+            REGRA CRÍTICA: Você só pode mencionar o produto que está em "DADOS DO PRODUTO SELECIONADO". Não invente nem cite outros nomes de produtos.
+            Não finalize com perguntas.
             Responda APENAS com o texto final ao usuário (sem cabeçalhos, sem JSON, sem repetir seções acima).
             
             RESPOSTA DO CONSULTOR:
