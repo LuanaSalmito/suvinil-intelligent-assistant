@@ -32,8 +32,7 @@ class OrchestratorAgent:
         self.db = db
         self.user_id = user_id
         self.rag = RAGService(db)
-        # IMPORTANTE: ChatOpenAI não lê automaticamente settings.OPENAI_API_KEY.
-        # Se não passarmos explicitamente, o orquestrador cai no fallback.
+ 
         self.llm = ChatOpenAI(
             model=settings.OPENAI_CHAT_MODEL,
             temperature=0,
@@ -42,7 +41,6 @@ class OrchestratorAgent:
         self.parser = PydanticOutputParser(pydantic_object=PaintContext)
         self.image_generator = ImageGenerator()
         self.conversation_memory: List[Dict] = []
-        # Memória “de slots” (persistente) para follow-ups tipo: "e fosco ou acetinado?"
         self.slot_memory: PaintContext = PaintContext()
         
         self.style_guide = """

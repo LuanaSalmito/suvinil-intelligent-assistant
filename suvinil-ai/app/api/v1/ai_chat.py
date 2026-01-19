@@ -157,6 +157,44 @@ def _is_openai_configured() -> bool:
     # OpenAI keys normalmente começam com "sk-" (inclui "sk-proj-")
     return bool(key and key.startswith("sk-"))
 
+def _persist_chat_turn(db: Session, user_id: Optional[int], user_text: str, assistant_text: str) -> None:
+    """
+    Persiste um turno (user + assistant) no banco para recuperar contexto depois.
+    Só persiste para usuários autenticados (ChatMessage.user_id é NOT NULL).
+    """
+    if not user_id:
+        return
+    try:
+        db.add(ChatMessage(user_id=user_id, role="user", content=user_text))
+        db.add(ChatMessage(user_id=user_id, role="assistant", content=assistant_text))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Falha ao persistir histórico de chat (user_id={user_id}): {e}")
+
+def _hydrate_orchestrator_memory_from_db(db: Session, user_id: Optional[int], orchestrator: Any, limit: int = 30) -> None:
+    """
+    Carrega histórico do banco para o orquestrador recuperar contexto após restart/reload.
+    - Só para usuários autenticados (user_id int).
+    - Não duplica hidratação dentro da mesma sessão.
+    """
+    if not user_id:
+        return
+    if getattr(orchestrator, "_db_hydrated", False):
+        return
+    try:
+        msgs = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.user_id == user_id)
+            .order_by(ChatMessage.created_at.asc())
+            .limit(limit)
+            .all()
+        )
+        orchestrator.conversation_memory = [{"role": m.role, "content": m.content} for m in msgs]
+        setattr(orchestrator, "_db_hydrated", True)
+    except Exception as e:
+        logger.warning(f"Falha ao hidratar memória do orquestrador (user_id={user_id}): {e}")
+
 def _is_price_query(message: str) -> bool:
     """
     Detecta intenções de consulta de preço.
@@ -996,6 +1034,11 @@ async def chat(
     
     if chat_message.reset_conversation:
         orchestrator.reset_memory()
+        # Evitar re-hidratar do banco no mesmo request após reset explícito
+        setattr(orchestrator, "_db_hydrated", True)
+    else:
+        # Carregar histórico do banco (usuário logado) para manter contexto consistente
+        _hydrate_orchestrator_memory_from_db(db, user_id, orchestrator, limit=30)
     
     try:
         # Executar orquestrador (agora é async)
@@ -1039,6 +1082,9 @@ async def chat(
         # Se gerou imagem, adicionar ao response (extensão do schema)
         if "image_url" in result:
             response.image_url = result["image_url"]
+
+        # Persistir histórico (usuário autenticado) para manter memória pós-restart
+        _persist_chat_turn(db, user_id, chat_message.message, response.response)
         
         return response
         
@@ -1049,6 +1095,8 @@ async def chat(
         traceback.print_exc()
         
         result = _simple_chat_response(chat_message.message, db, user_id=session_key)
+        # Persistir também o fallback para histórico do usuário (se autenticado)
+        _persist_chat_turn(db, user_id, chat_message.message, result.get("response", ""))
         return ChatResponse(
             response=result["response"],
             tools_used=[ToolUsage(**t) for t in result["tools_used"]],

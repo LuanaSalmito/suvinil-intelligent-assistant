@@ -15,10 +15,8 @@ from app.api.v1 import auth, users, paints, ai_chat
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle events da aplicação"""
-    # Startup: criar tabelas se não existirem
     Base.metadata.create_all(bind=engine)
     yield
-    # Shutdown (se necessário)
 
 
 app = FastAPI(
@@ -30,18 +28,15 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS - DEVE ser adicionado PRIMEIRO
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Em produção, especificar domínios
+    allow_origins=["*"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
 
-
-# Handler global de exceções para garantir CORS em erros
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
@@ -52,7 +47,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 
-# Routers
+
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(paints.router, prefix="/paints", tags=["Paints"])
