@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { chatApi } from '../lib/api';
+import { chatApi, paintsApi } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { ChatBubble, ChatBubbleMessage } from '../components/chat/ChatBubble';
 import { ChatInput } from '../components/chat/ChatInput';
@@ -12,8 +12,27 @@ export function Chat() {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [paintCount, setPaintCount] = useState(null);
   const { user, logout, isAdmin, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadPaintCount = async () => {
+      try {
+        const data = await paintsApi.getCount();
+        if (isMounted && typeof data?.total === 'number') {
+          setPaintCount(data.total);
+        }
+      } catch (error) {
+        console.error('Error loading paint count:', error);
+      }
+    };
+    loadPaintCount();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
@@ -114,10 +133,15 @@ export function Chat() {
         <ChatMessageList>
           {messages.length === 0 ? (
             <div className="flex items-center justify-center h-full">
-              <div className="text-center space-y-2">
-                <h2 className="text-2xl font-semibold">Olá! 👋</h2>
+              <div className="text-left max-w-xl space-y-3">
+                <p className="text-lg font-semibold">
+                  Oi! Me conta o que você quer pintar e o que precisa na tinta.
+                </p>
                 <p className="text-muted-foreground">
-                  Como posso ajudá-lo hoje com tintas Suvinil?
+                  Posso sugerir opções do nosso catálogo ({paintCount ?? 5} disponíveis) com base no ambiente e no acabamento que você prefere.
+                </p>
+                <p className="text-muted-foreground">
+                  Exemplo: "Quero pintar o quarto, algo fácil de limpar e sem cheiro forte."
                 </p>
               </div>
             </div>
