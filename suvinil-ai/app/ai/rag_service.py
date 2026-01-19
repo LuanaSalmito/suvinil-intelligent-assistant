@@ -1,4 +1,8 @@
 import os
+# ChromaDB telemetria (anônima) pode falhar em alguns ambientes/versões e poluir logs.
+# Desabilitar aqui garante que esteja setado antes de importar/instanciar o Chroma.
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+os.environ.setdefault("CHROMA_TELEMETRY", "False")
 import logging
 import shutil
 from typing import List, Optional, Dict, Any
