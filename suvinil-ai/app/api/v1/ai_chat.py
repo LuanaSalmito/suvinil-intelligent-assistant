@@ -1,15 +1,3 @@
-"""
-Endpoints de Chat com IA - Assistente Inteligente Suvinil
-
-Este módulo expõe a API do chatbot inteligente de tintas,
-com suporte a:
-- Sistema Multi-Agentes com Orquestrador
-- Conversação natural com especialistas
-- Histórico persistente
-- Recomendações personalizadas
-- Geração de visualizações com DALL-E
-- Observabilidade completa do raciocínio
-"""
 import re
 import logging
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,7 +10,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_active_user
 from app.core.config import settings
 from app.repositories.paint_repository import PaintRepository
-from app.ai.rag_service import RAGService
+from app.ai.rag_service import RagService
 from app.ai.image_generator import ImageGenerator
 from app.models.chat_message import ChatMessage
 
