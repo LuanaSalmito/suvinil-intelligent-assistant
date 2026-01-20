@@ -1,0 +1,57 @@
+# ============================================
+# SUVINIL AI - Dependências Python
+# ============================================
+
+# FastAPI e servidor
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Banco de dados
+sqlalchemy==2.0.25
+alembic==1.13.1
+psycopg2-binary==2.9.9
+
+# Autenticação e segurança
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-dotenv==1.0.0
+
+# Validação e serialização
+pydantic==2.5.3
+pydantic-settings==2.1.0
+email-validator>=2.1.0
+
+# ============================================
+# IA e LangChain
+# ============================================
+langchain==0.1.16
+langchain-openai==0.1.3
+langchain-community==0.0.32
+langchain-core==0.1.42
+
+# OpenAI
+openai>=1.12.0
+
+# Vector Store (opcional, para RAG)
+chromadb>=0.4.22
+
+# ============================================
+# Utilitários
+# ============================================
+httpx>=0.26.0
+
+# Importação de XLSX (seed do catálogo)
+openpyxl==3.1.5
+
+# YAML para gerenciamento de prompts
+pyyaml>=6.0
+
+# ============================================
+# Testes
+# ============================================
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-mock==3.12.0

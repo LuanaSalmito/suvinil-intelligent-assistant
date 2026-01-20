@@ -1,0 +1,44 @@
+# Prompts para Geração de Imagens (ImageGenerator)
+# Mapeamentos e templates para geração de visualizações com DALL-E
+
+# Descrições de cores para o DALL-E (em inglês para melhor qualidade)
+color_descriptions:
+  azul: "blue paint, calming azure tone"
+  vermelho: "red paint, vibrant crimson tone"
+  verde: "green paint, fresh sage tone"
+  amarelo: "yellow paint, warm sunny tone"
+  branco: "white paint, pure clean tone"
+  cinza: "gray paint, modern neutral tone"
+  rosa: "pink paint, soft pastel tone"
+  roxo: "purple paint, elegant lavender tone"
+  laranja: "orange paint, energetic tangerine tone"
+  bege: "beige paint, warm neutral tone"
+  default: "{color} paint"
+
+# Descrições de acabamentos para o DALL-E
+finish_descriptions:
+  fosco: "matte finish, elegant and modern"
+  brilhante: "glossy finish, vibrant and reflective"
+  acetinado: "satin finish, subtle sheen"
+  semi-brilhante: "semi-gloss finish, balanced appearance"
+  default: "matte finish"
+
+# Mapeamento de ambientes (português -> inglês)
+environment_map:
+  quarto: "bedroom"
+  sala: "living room"
+  escritório: "office"
+  escritorio: "office"
+  banheiro: "bathroom"
+  cozinha: "kitchen"
+  fachada: "house exterior facade"
+  muro: "exterior wall"
+  varanda: "balcony"
+
+# Template principal do prompt DALL-E
+dalle_prompt_template: |
+  A modern and well-lit {environment}, professionally painted with {color_desc} in {finish_desc}.
+  The room features clean walls with the paint freshly applied, showing excellent coverage.
+  Natural lighting highlights the color beautifully.
+  Professional interior design photography, high quality, realistic, 8k.
+  The paint color is the main focus, showing how it transforms the space.
