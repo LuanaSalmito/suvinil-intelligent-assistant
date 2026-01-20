@@ -1,0 +1,39 @@
+# Prompts dos Especialistas (Specialists)
+# Base de conhecimento e mensagens usadas pelos diferentes especialistas
+
+# ColorExpert - Insights sobre cores e harmonização
+color_insights:
+  rosa: "O Rosa transmite delicadeza e modernidade, ideal para criar pontos de acolhimento."
+  cinza: "O Cinza Urbano é uma escolha minimalista que valoriza a luz natural."
+  azul: "Tons de azul estimulam o foco, sendo excelentes para escritórios ou fachadas serenas."
+  verde: "O Verde traz frescor e conexão com a natureza, perfeito para espaços de relaxamento."
+  branco: "O Branco é atemporal e amplia visualmente os ambientes."
+  amarelo: "O Amarelo traz energia e alegria, ideal para espaços de convivência."
+  vermelho: "O Vermelho é ousado e vibrante, perfeito para criar pontos de destaque."
+  default: "A cor {cor} cria uma atmosfera personalizada e única."
+
+# SurfaceExpert - Mensagens sobre compatibilidade de superfície
+surface_expert:
+  reasoning_template: "Para aplicar em {surface}, a {product_name} é compatível com a superfície e evita problemas de aderência/descascamento."
+
+# ExteriorExpert - Mensagens sobre resistência climática
+exterior_expert:
+  reasoning_with_color: "Para sua varanda/área externa, recomendo a {product_name} na cor {color}. Possui excelente resistência ao tempo e proteção UV."
+  
+  reasoning_no_color: "Não encontrei uma tinta {cor_solicitada} para externo no catálogo. A opção mais próxima é {product_name} ({color}), que tem ótima resistência climática."
+  
+  warning_no_color: "Cor '{cor_solicitada}' não disponível para área externa"
+
+# InteriorExpert - Mensagens sobre ambientes internos
+interior_expert:
+  reasoning_with_color: "Para o seu interior, recomendo a {product_name} na cor {color}."
+  
+  reasoning_no_color: "Não encontrei uma tinta {cor_solicitada} para interno no catálogo. A opção mais próxima é {product_name} ({color})."
+  
+  reasoning_no_products: "Não encontrei tintas adequadas para o ambiente interno."
+  
+  warning_no_color: "Cor '{cor_solicitada}' não disponível"
+
+# ColorExpert - Mensagens quando não há correspondência
+color_expert:
+  no_match_reasoning: "A cor {cor} é excelente para {ambiente}, mas precisamos validar a base química."

@@ -11,6 +11,10 @@ from sqlalchemy.orm import Session
 from app.ai.rag_service import RAGService
 from app.ai.specialists import get_all_specialists, SpecialistRecommendation
 from app.ai.image_generator import ImageGenerator
+<<<<<<< HEAD
+=======
+from app.ai.prompts import prompt_manager
+>>>>>>> feature/front-configs
 from app.repositories.paint_repository import PaintRepository
 from app.core.config import settings
 
@@ -43,6 +47,7 @@ class OrchestratorAgent:
         self.conversation_memory: List[Dict] = []
         self.slot_memory: PaintContext = PaintContext()
         
+<<<<<<< HEAD
         self.style_guide = """
         VOCÊ É UM CONSULTOR TÉCNICO ESPECIALISTA EM ACABAMENTOS E CORES.
         
@@ -58,6 +63,10 @@ class OrchestratorAgent:
         - Sugira apenas 1 produto (o melhor para o caso).
         - NÃO termine com perguntas. Só faça perguntas quando for estritamente necessário para destravar a recomendação.
         """
+=======
+        self.prompts = prompt_manager.get_orchestrator_prompts()
+        self.style_guide = self.prompts.get('style_guide', '')
+>>>>>>> feature/front-configs
 
     def reset_memory(self):
         self.conversation_memory = []
@@ -195,9 +204,16 @@ class OrchestratorAgent:
             lines.append(f"• **{p.nome} - {color_label}** ({p.linha.value})")
             paints_mentioned.append(p.id)
         if not lines:
+<<<<<<< HEAD
             response = "No momento, não encontrei tintas cadastradas no catálogo."
         else:
             response = "Aqui estão as tintas do catálogo:\n\n" + "\n".join(lines)
+=======
+            response = self.prompts.get('no_catalog', "No momento, não encontrei tintas cadastradas no catálogo.")
+        else:
+            catalog_header = self.prompts.get('catalog_header', "Aqui estão as tintas do catálogo:")
+            response = f"{catalog_header}\n\n" + "\n".join(lines)
+>>>>>>> feature/front-configs
         return {
             "response": response,
             "context": {},
@@ -360,6 +376,7 @@ class OrchestratorAgent:
                 env_label = merged.environment
                 surf = (merged.surface_type or "").strip().lower()
                 cor = (merged.color or "").strip().lower()
+<<<<<<< HEAD
 
                 # Nunca assumir "madeira" (isso estava puxando respostas erradas).
                 if not surf:
@@ -392,6 +409,34 @@ class OrchestratorAgent:
                         f"No catálogo atual, não encontrei uma tinta cadastrada especificamente para {merged.surface_type} em ambiente {env_label}{cor_hint}. "
                         "A parede é gesso/massa corrida ou reboco, e você prefere fosco ou acetinado?"
                     )
+=======
+                cor_hint = f" na cor {cor}" if cor else ""
+
+                no_product = self.prompts.get('no_product_responses', {})
+
+                # Nunca assumir "madeira" (isso estava puxando respostas erradas).
+                if not surf:
+                    template = no_product.get('no_environment_and_surface', 
+                        "No catálogo atual, não encontrei uma tinta cadastrada com esses critérios para ambiente {env_label}{cor_hint}. Você vai pintar **parede**, **madeira** ou **metal**?")
+                    response_text = template.format(env_label=env_label, cor_hint=cor_hint)
+                elif any(k in surf for k in ["madeira", "mdf", "compens", "laminad"]):
+                    # Madeira: pergunta certa depende do ambiente
+                    if env_label == "externo":
+                        response_text = no_product.get('madeira_externa',
+                            "No catálogo atual, não encontrei uma tinta cadastrada especificamente para madeira em área externa. A madeira é crua ou já tem verniz/tinta, e pega sol/chuva diretamente?")
+                    else:
+                        response_text = no_product.get('madeira_interna',
+                            "No catálogo atual, não encontrei uma tinta cadastrada especificamente para madeira em ambiente interno. A madeira é crua ou já tem verniz/tinta, e você quer acabamento fosco ou acetinado?")
+                elif any(k in surf for k in ["metal", "ferro", "aço", "aco", "alum", "inox"]):
+                    template = no_product.get('metal',
+                        "No catálogo atual, não encontrei uma tinta cadastrada especificamente para {surface_type} em ambiente {env_label}. É metal novo ou já pintado (com ferrugem/descascando)?")
+                    response_text = template.format(surface_type=merged.surface_type, env_label=env_label)
+                else:
+                    # Parede/alvenaria/etc.
+                    template = no_product.get('parede',
+                        "No catálogo atual, não encontrei uma tinta cadastrada especificamente para {surface_type} em ambiente {env_label}{cor_hint}. A parede é gesso/massa corrida ou reboco, e você prefere fosco ou acetinado?")
+                    response_text = template.format(surface_type=merged.surface_type, env_label=env_label, cor_hint=cor_hint)
+>>>>>>> feature/front-configs
 
             tools_used.append({
                 "tool": "db_catalog_no_match",
@@ -413,6 +458,7 @@ class OrchestratorAgent:
         
         paint_info = self._format_paint_info(best_paint)
 
+<<<<<<< HEAD
         # Prompt com Engenharia de Contexto
         prompt = ChatPromptTemplate.from_template("""
             {style_guide}
@@ -438,6 +484,10 @@ class OrchestratorAgent:
             
             RESPOSTA DO CONSULTOR:
         """)
+=======
+        final_synthesis_template = self.prompts.get('final_synthesis', '')
+        prompt = ChatPromptTemplate.from_template(final_synthesis_template)
+>>>>>>> feature/front-configs
         
         chain = prompt | self.llm
         final_res = await chain.ainvoke({
@@ -511,6 +561,7 @@ class OrchestratorAgent:
         recent = history[-8:] if history else []
         history_text = "\n".join([f"{m.get('role')}: {m.get('content')}" for m in recent if m.get("content")])
 
+<<<<<<< HEAD
         prompt = ChatPromptTemplate.from_template(
             "Você é um extrator de informações. Retorne APENAS um JSON válido, sem texto extra.\n"
             "Objetivo: preencher os slots de uma conversa sobre pintura.\n"
@@ -521,6 +572,11 @@ class OrchestratorAgent:
             "MENSAGEM_ATUAL: {input}\n"
             "{format_instructions}"
         )
+=======
+        context_extraction_template = self.prompts.get('context_extraction', '')
+        prompt = ChatPromptTemplate.from_template(context_extraction_template)
+        
+>>>>>>> feature/front-configs
         chain = prompt | self.llm | self.parser
         try:
             return chain.invoke({
@@ -540,8 +596,23 @@ class OrchestratorAgent:
         return missing
 
     def _ask_for_missing(self, missing: List[str]) -> str:
+<<<<<<< HEAD
         questions = {
             "ambiente (interno/externo)": "Para te indicar a melhor tecnologia, esse ambiente é interno ou externo?",
             "tipo de superfície": "Em qual superfície faremos a aplicação (parede, madeira ou metal)?"
         }
         return questions.get(missing[0], "Poderia me dar mais detalhes sobre o que você deseja transformar?")
+=======
+        questions = self.prompts.get('missing_slot_questions', {})
+        
+        slot_map = {
+            "ambiente (interno/externo)": "ambiente",
+            "tipo de superfície": "tipo_de_superficie"
+        }
+        
+        if not missing:
+            return questions.get('default', "Poderia me dar mais detalhes sobre o que você deseja transformar?")
+        
+        slot_key = slot_map.get(missing[0], 'default')
+        return questions.get(slot_key, questions.get('default', "Poderia me dar mais detalhes sobre o que você deseja transformar?"))
+>>>>>>> feature/front-configs

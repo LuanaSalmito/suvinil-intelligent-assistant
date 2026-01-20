@@ -1,6 +1,10 @@
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.repositories.paint_repository import PaintRepository
+<<<<<<< HEAD
+=======
+from app.ai.prompts import prompt_manager
+>>>>>>> feature/front-configs
 
 class SpecialistRecommendation:
     def __init__(
@@ -65,6 +69,13 @@ class SurfaceExpert(BaseSpecialist):
     """Especialista em compatibilidade por superfície (madeira/metal/parede)."""
     name = "Especialista em Superfícies e Preparação"
 
+<<<<<<< HEAD
+=======
+    def __init__(self, db: Session):
+        super().__init__(db)
+        self.prompts = prompt_manager.get_specialist_prompts().get('surface_expert', {})
+
+>>>>>>> feature/front-configs
     def can_help(self, context: Dict) -> bool:
         surf = (context.get("tipo_parede") or "").lower()
         return any(k in surf for k in ["madeira", "mdf", "ferro", "metal", "aço", "aco", "alumin", "inox", "parede", "alvenaria", "gesso"])
@@ -100,9 +111,19 @@ class SurfaceExpert(BaseSpecialist):
             return None
 
         top_pick = filtered[0]
+<<<<<<< HEAD
         return SpecialistRecommendation(
             specialist_name=self.name,
             reasoning=f"Para aplicar em {surface}, a {top_pick.nome} é compatível com a superfície e evita problemas de aderência/descascamento.",
+=======
+        reasoning_template = self.prompts.get('reasoning_template', 
+            "Para aplicar em {surface}, a {product_name} é compatível com a superfície e evita problemas de aderência/descascamento.")
+        reasoning = reasoning_template.format(surface=surface, product_name=top_pick.nome)
+        
+        return SpecialistRecommendation(
+            specialist_name=self.name,
+            reasoning=reasoning,
+>>>>>>> feature/front-configs
             recommended_paints=[top_pick],
             confidence=0.93,
             key_attributes=["Compatibilidade de superfície", "Aderência"],
@@ -113,6 +134,13 @@ class ExteriorExpert(BaseSpecialist):
     """Especialista em Resistência Climática e Fachadas."""
     name = "Consultor de Engenharia Revestimento"
     
+<<<<<<< HEAD
+=======
+    def __init__(self, db: Session):
+        super().__init__(db)
+        self.prompts = prompt_manager.get_specialist_prompts().get('exterior_expert', {})
+    
+>>>>>>> feature/front-configs
     def can_help(self, context: Dict) -> bool:
         env = (context.get("ambiente") or "").lower()
         surface = (context.get("tipo_parede") or "").lower()
@@ -135,6 +163,7 @@ class ExteriorExpert(BaseSpecialist):
             if p.ambiente.value in ["Externo", "Interno/Externo"]
             and "madeira" not in (p.tipo_parede or "").lower()
         ]
+<<<<<<< HEAD
 
         if not suitable: return None
 
@@ -206,18 +235,111 @@ class ColorExpert(BaseSpecialist):
             return SpecialistRecommendation(
                 specialist_name=self.name,
                 reasoning=f"A cor {cor} é excelente para {(context.get('ambiente') or 'o ambiente')}, mas precisamos validar a base química.",
+=======
+
+        if not suitable: return None
+
+        # PRIORIDADE: Se o usuário pediu uma cor, filtrar por ela primeiro
+        if cor_solicitada:
+            with_color = [p for p in suitable if cor_solicitada in (p.cor or "").lower()]
+            if with_color:
+                suitable = with_color
+            else:
+                # Não tem a cor pedida - informar na resposta
+                top_pick = suitable[0]
+                reasoning_template = self.prompts.get('reasoning_no_color',
+                    "Não encontrei uma tinta {cor_solicitada} para externo no catálogo. A opção mais próxima é {product_name} ({color}), que tem ótima resistência climática.")
+                reasoning = reasoning_template.format(
+                    cor_solicitada=cor_solicitada, 
+                    product_name=top_pick.nome, 
+                    color=top_pick.cor
+                )
+                warning_template = self.prompts.get('warning_no_color', "Cor '{cor_solicitada}' não disponível para área externa")
+                warning = warning_template.format(cor_solicitada=cor_solicitada)
+                
+                return SpecialistRecommendation(
+                    specialist_name=self.name,
+                    reasoning=reasoning,
+                    recommended_paints=[top_pick],
+                    confidence=0.7,
+                    key_attributes=["Resistência Climática"],
+                    technical_warnings=[warning]
+                )
+
+        # Ordenação por robustez
+        suitable.sort(key=lambda x: "sol" in (x.features or "").lower(), reverse=True)
+        top_pick = suitable[0]
+
+        reasoning_template = self.prompts.get('reasoning_with_color',
+            "Para sua varanda/área externa, recomendo a {product_name} na cor {color}. Possui excelente resistência ao tempo e proteção UV.")
+        reasoning = reasoning_template.format(product_name=top_pick.nome, color=top_pick.cor)
+
+        return SpecialistRecommendation(
+            specialist_name=self.name,
+            reasoning=reasoning,
+            recommended_paints=[top_pick],
+            confidence=0.98,
+            key_attributes=["Anti-mofo", "Proteção UV", "Resistente à chuva"]
+        )
+
+class ColorExpert(BaseSpecialist):
+    """Especialista em Estética e Harmonização Visual."""
+    name = "Curador de Estética Suvinil"
+
+    def __init__(self, db: Session):
+        super().__init__(db)
+        self.prompts = prompt_manager.get_specialist_prompts()
+        self.color_insights = self.prompts.get('color_insights', {})
+
+    def can_help(self, context: Dict) -> bool:
+        return bool((context.get("cor") or "").strip())
+
+    def analyze(self, context: Dict) -> Optional[SpecialistRecommendation]:
+        cor = (context.get("cor") or "").lower()
+        if not cor: return None
+
+        candidates = self._get_base_candidates(context)
+        # Busca tintas que tenham a cor
+        matches = [
+            p for p in candidates 
+            if cor in (p.cor or "").lower()
+        ]
+
+        if not matches:
+            no_match = self.prompts.get('color_expert', {})
+            reasoning_template = no_match.get('no_match_reasoning', 
+                "A cor {cor} é excelente para {ambiente}, mas precisamos validar a base química.")
+            reasoning = reasoning_template.format(
+                cor=cor, 
+                ambiente=(context.get('ambiente') or 'o ambiente')
+            )
+            return SpecialistRecommendation(
+                specialist_name=self.name,
+                reasoning=reasoning,
+>>>>>>> feature/front-configs
                 recommended_paints=[],
                 confidence=0.6,
                 key_attributes=["Tendência Visual"]
             )
 
+<<<<<<< HEAD
         return SpecialistRecommendation(
             specialist_name=self.name,
             reasoning=color_insights.get(cor, f"A cor {cor} cria uma atmosfera personalizada e única."),
+=======
+        # Buscar insight da cor no arquivo de prompts
+        default_template = self.color_insights.get('default', "A cor {cor} cria uma atmosfera personalizada e única.")
+        reasoning = self.color_insights.get(cor, default_template.format(cor=cor))
+
+        return SpecialistRecommendation(
+            specialist_name=self.name,
+            reasoning=reasoning,
+>>>>>>> feature/front-configs
             recommended_paints=matches[:2],
             confidence=0.95,
             key_attributes=["Harmonização", "Estética Contemporânea"]
         )
+<<<<<<< HEAD
 
 class InteriorExpert(BaseSpecialist):
     """Especialista em Conforto Interno (Sem Odor/Lavável)."""
@@ -243,6 +365,37 @@ class InteriorExpert(BaseSpecialist):
             if p.ambiente.value in ["Interno", "Interno/Externo"]
         ]
 
+=======
+
+class InteriorExpert(BaseSpecialist):
+    """Especialista em Conforto Interno (Sem Odor/Lavável)."""
+    name = "Especialista em Ambientes Internos"
+
+    def __init__(self, db: Session):
+        super().__init__(db)
+        self.prompts = prompt_manager.get_specialist_prompts().get('interior_expert', {})
+
+    def can_help(self, context: Dict) -> bool:
+        env = (context.get("ambiente") or "").lower()
+        # Se explicitamente externo, não atua
+        return "extern" not in env and "fachada" not in env and "varanda" not in env
+
+    def analyze(self, context: Dict) -> Optional[SpecialistRecommendation]:
+        env = (context.get("ambiente") or "").lower()
+        cor_solicitada = (context.get("cor") or "").lower()
+        
+        if "extern" in env or "fachada" in env or "varanda" in env: 
+            return None
+
+        candidates = self._get_base_candidates(context)
+        
+        # Filtra por ambiente interno
+        interior_paints = [
+            p for p in candidates 
+            if p.ambiente.value in ["Interno", "Interno/Externo"]
+        ]
+
+>>>>>>> feature/front-configs
         if not interior_paints: return None
 
         # PRIORIDADE: Se o usuário pediu uma cor, filtrar por ela primeiro
@@ -253,6 +406,7 @@ class InteriorExpert(BaseSpecialist):
             else:
                 # Não tem a cor pedida
                 top_pick = interior_paints[0]
+<<<<<<< HEAD
                 return SpecialistRecommendation(
                     specialist_name=self.name,
                     reasoning=f"Não encontrei uma tinta {cor_solicitada} para interno no catálogo. "
@@ -261,6 +415,25 @@ class InteriorExpert(BaseSpecialist):
                     confidence=0.7,
                     key_attributes=["Sem Odor"],
                     technical_warnings=[f"Cor '{cor_solicitada}' não disponível"]
+=======
+                reasoning_template = self.prompts.get('reasoning_no_color',
+                    "Não encontrei uma tinta {cor_solicitada} para interno no catálogo. A opção mais próxima é {product_name} ({color}).")
+                reasoning = reasoning_template.format(
+                    cor_solicitada=cor_solicitada,
+                    product_name=top_pick.nome,
+                    color=top_pick.cor
+                )
+                warning_template = self.prompts.get('warning_no_color', "Cor '{cor_solicitada}' não disponível")
+                warning = warning_template.format(cor_solicitada=cor_solicitada)
+                
+                return SpecialistRecommendation(
+                    specialist_name=self.name,
+                    reasoning=reasoning,
+                    recommended_paints=[top_pick],
+                    confidence=0.7,
+                    key_attributes=["Sem Odor"],
+                    technical_warnings=[warning]
+>>>>>>> feature/front-configs
                 )
 
         # Score de aderência aos requisitos de saúde
@@ -276,9 +449,21 @@ class InteriorExpert(BaseSpecialist):
         top_paints = [s[0] for s in scored[:2]]
 
         if top_paints:
+<<<<<<< HEAD
             reasoning = f"Para o seu interior, recomendo a {top_paints[0].nome} na cor {top_paints[0].cor}."
         else:
             reasoning = "Não encontrei tintas adequadas para o ambiente interno."
+=======
+            reasoning_template = self.prompts.get('reasoning_with_color',
+                "Para o seu interior, recomendo a {product_name} na cor {color}.")
+            reasoning = reasoning_template.format(
+                product_name=top_paints[0].nome,
+                color=top_paints[0].cor
+            )
+        else:
+            reasoning = self.prompts.get('reasoning_no_products',
+                "Não encontrei tintas adequadas para o ambiente interno.")
+>>>>>>> feature/front-configs
 
         return SpecialistRecommendation(
             specialist_name=self.name,

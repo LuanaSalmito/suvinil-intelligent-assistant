@@ -8,6 +8,15 @@ up:
 	@echo "📍 Frontend: http://localhost:5173"
 	@echo "📍 Backend:  http://localhost:8000"
 	@echo "📍 Swagger:  http://localhost:8000/docs"
+	@echo "🌐 Abrindo Frontend e Swagger no navegador..."
+	@sh -c 'OPEN=""; for c in xdg-open wslview open; do command -v $$c >/dev/null 2>&1 && OPEN=$$c && break; done; \
+		if [ -n "$$OPEN" ]; then \
+			($$OPEN http://localhost:5173 >/dev/null 2>&1 &); \
+			($$OPEN http://localhost:8000/docs >/dev/null 2>&1 &); \
+		else \
+			echo "⚠️ Não encontrei comando para abrir navegador (xdg-open/wslview/open)."; \
+			echo "Abra manualmente: http://localhost:5173 e http://localhost:8000/docs"; \
+		fi' || true
 
 down:
 	@echo "🛑 Parando aplicação..."
