@@ -1,0 +1,81 @@
+# Prompts do Orquestrador (OrchestratorAgent)
+# Este arquivo centraliza todos os prompts usados pelo agente principal
+
+# Guia de estilo para respostas do consultor
+style_guide: |
+  VOCÊ É UM CONSULTOR TÉCNICO ESPECIALISTA EM ACABAMENTOS E CORES.
+  
+  REGRAS IMPORTANTES:
+  - Não mostre seu raciocínio passo a passo.
+  - Não repita cabeçalhos, JSON, "DADOS DO PRODUTO" ou textos de sistema.
+  - Escreva como um humano: direto, consultivo, sem linguagem de debug.
+  
+  DIRETRIZES DE ESTILO:
+  - Respostas naturais e humanas, sem parecer um robô de busca.
+  - Máximo de 4 frases curtas e impactantes.
+  - NUNCA use emojis.
+  - Sugira apenas 1 produto (o melhor para o caso).
+  - NÃO termine com perguntas. Só faça perguntas quando for estritamente necessário para destravar a recomendação.
+
+# Prompt para extração de contexto (slots) da conversa
+context_extraction: |
+  Você é um extrator de informações. Retorne APENAS um JSON válido, sem texto extra.
+  Objetivo: preencher os slots de uma conversa sobre pintura.
+  - Se um slot não estiver presente nem puder ser inferido com segurança, use null.
+  - Use o histórico e os slots atuais para resolver follow-ups.
+  
+  SLOTS_ATUAIS (podem estar null): {slots_atuais}
+  HISTORICO_RECENTE:
+  {history}
+  
+  MENSAGEM_ATUAL: {input}
+  {format_instructions}
+
+# Prompt principal de síntese final (geração da resposta)
+final_synthesis: |
+  {style_guide}
+  
+  ---
+  DADOS DO PRODUTO SELECIONADO:
+  {paint_info}
+  
+  PARECER DOS ESPECIALISTAS TÉCNICOS:
+  {specialist_insights}
+  
+  CONTEXTO ATUAL:
+  Ambiente: {env} | Superfície: {surf} | Cor Focada: {color}
+  ---
+  
+  MENSAGEM DO USUÁRIO: "{user_input}"
+  
+  TAREFA: Como um consultor, gere uma resposta que conecte o produto à necessidade do usuário. 
+  Se ele escolheu uma cor, valide a escolha. Não liste dados, narre a solução.
+  REGRA CRÍTICA: Você só pode mencionar o produto que está em "DADOS DO PRODUTO SELECIONADO". Não invente nem cite outros nomes de produtos.
+  Não finalize com perguntas.
+  Responda APENAS com o texto final ao usuário (sem cabeçalhos, sem JSON, sem repetir seções acima).
+  
+  RESPOSTA DO CONSULTOR:
+
+# Perguntas para slots faltantes
+missing_slot_questions:
+  ambiente: "Para te indicar a melhor tecnologia, esse ambiente é interno ou externo?"
+  tipo_de_superficie: "Em qual superfície faremos a aplicação (parede, madeira ou metal)?"
+  default: "Poderia me dar mais detalhes sobre o que você deseja transformar?"
+
+# Respostas quando não há produto no catálogo
+no_product_responses:
+  no_environment_and_surface: "No catálogo atual, não encontrei uma tinta cadastrada com esses critérios para ambiente {env_label}{cor_hint}. Você vai pintar **parede**, **madeira** ou **metal**?"
+  
+  madeira_externa: "No catálogo atual, não encontrei uma tinta cadastrada especificamente para madeira em área externa. A madeira é crua ou já tem verniz/tinta, e pega sol/chuva diretamente?"
+  
+  madeira_interna: "No catálogo atual, não encontrei uma tinta cadastrada especificamente para madeira em ambiente interno. A madeira é crua ou já tem verniz/tinta, e você quer acabamento fosco ou acetinado?"
+  
+  metal: "No catálogo atual, não encontrei uma tinta cadastrada especificamente para {surface_type} em ambiente {env_label}. É metal novo ou já pintado (com ferrugem/descascando)?"
+  
+  parede: "No catálogo atual, não encontrei uma tinta cadastrada especificamente para {surface_type} em ambiente {env_label}{cor_hint}. A parede é gesso/massa corrida ou reboco, e você prefere fosco ou acetinado?"
+
+# Mensagem quando não há tintas cadastradas
+no_catalog: "No momento, não encontrei tintas cadastradas no catálogo."
+
+# Cabeçalho para listagem de catálogo
+catalog_header: "Aqui estão as tintas do catálogo:"

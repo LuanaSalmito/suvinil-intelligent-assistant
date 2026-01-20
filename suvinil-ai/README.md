@@ -27,6 +27,12 @@ O **Suvinil AI** é um assistente virtual que ajuda clientes a escolherem o prod
 - ✅ Mantém contexto da conversa (memória)
 - ✅ Gera visualizações com DALL-E (opcional)
 - ✅ Oferece API REST documentada com Swagger
+- ✅ A geração visual foi considerada, mas priorizei a robustez do agente, RAG e arquitetura do backend dentro do prazo. Em um próximo ciclo, a imagem seria adicionada via DALL·E como ferramenta do agente
+
+### Acompanhamento do backlog e de progresso
+
+https://www.notion.so/Loomi-Back-IA-2eb19abb5799801a8b22d2f08a4e566e?source=copy_link
+
 
 ### Exemplos de Interação
 
@@ -128,9 +134,9 @@ IA: Sugiro o tom **Azul Sereno** da linha Suvinil Fachada Acrílica.
 ## 📦 Instalação
 
 ### Pré-requisitos
-- Python 3.10+
-- PostgreSQL 14+
-- Docker (opcional)
+- Python
+- PostgreSQL
+- Docker
 
 ### 1. Clone o repositório
 ```bash
@@ -141,9 +147,8 @@ cd suvinil-ai
 ### 2. Crie ambiente virtual
 ```bash
 python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# ou
-.\venv\Scripts\activate   # Windows
+source venv/bin/activate 
+.\venv\Scripts\activate   
 ```
 
 ### 3. Instale dependências
@@ -189,19 +194,16 @@ docker-compose up -d db
 
 ## 🚀 Execução
 
-### Desenvolvimento Local
-```bash
-# Inicializar banco de dados com dados de exemplo
-python -m app.core.init_db
-
-# Iniciar servidor
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
 ### Docker Compose
 ```bash
 docker-compose up --build
 ```
+
+### Seed do banco de dados
+```bash
+cd seed-db
+```
+- **Basta executar a seed que irá popular o banco com o csv**
 
 ### Acessar a API
 - **Swagger UI**: http://localhost:8000/docs

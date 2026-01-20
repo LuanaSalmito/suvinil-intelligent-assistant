@@ -9,6 +9,7 @@ import logging
 from typing import Optional
 from openai import AsyncOpenAI
 from app.core.config import settings
+from app.ai.prompts import prompt_manager
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,13 @@ class ImageGenerator:
             raise ValueError("OPENAI_API_KEY não configurada")
         
         self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        
+        self.prompts = prompt_manager.get_image_prompts()
+        self.color_descriptions = self.prompts.get('color_descriptions', {})
+        self.finish_descriptions = self.prompts.get('finish_descriptions', {})
+        self.environment_map = self.prompts.get('environment_map', {})
+        self.dalle_prompt_template = self.prompts.get('dalle_prompt_template', '')
+        
         logger.info("ImageGenerator inicializado com DALL-E")
     
     def _build_prompt(
@@ -34,39 +42,17 @@ class ImageGenerator:
         """
         Constrói prompt otimizado para DALL-E
         """
+        default_color = self.color_descriptions.get('default', '{color} paint')
+        color_desc = self.color_descriptions.get(color.lower(), default_color.format(color=color))
         
-        # Mapeamento de cores para descrições visuais
-        color_descriptions = {
-            "azul": "blue paint, calming azure tone",
-            "vermelho": "red paint, vibrant crimson tone",
-            "verde": "green paint, fresh sage tone",
-            "amarelo": "yellow paint, warm sunny tone",
-            "branco": "white paint, pure clean tone",
-            "cinza": "gray paint, modern neutral tone",
-            "rosa": "pink paint, soft pastel tone",
-            "roxo": "purple paint, elegant lavender tone",
-            "laranja": "orange paint, energetic tangerine tone",
-            "bege": "beige paint, warm neutral tone",
-        }
+        default_finish = self.finish_descriptions.get('default', 'matte finish')
+        finish_desc = self.finish_descriptions.get(finish.lower(), default_finish)
         
-        color_desc = color_descriptions.get(color.lower(), f"{color} paint")
-        
-        # Mapeamento de acabamentos
-        finish_descriptions = {
-            "fosco": "matte finish, elegant and modern",
-            "brilhante": "glossy finish, vibrant and reflective",
-            "acetinado": "satin finish, subtle sheen",
-            "semi-brilhante": "semi-gloss finish, balanced appearance"
-        }
-        
-        finish_desc = finish_descriptions.get(finish.lower(), "matte finish")
-        
-        # Prompt otimizado para DALL-E
-        prompt = f"""A modern and well-lit {environment}, professionally painted with {color_desc} in {finish_desc}.
-The room features clean walls with the paint freshly applied, showing excellent coverage.
-Natural lighting highlights the color beautifully.
-Professional interior design photography, high quality, realistic, 8k.
-The paint color is the main focus, showing how it transforms the space."""
+        prompt = self.dalle_prompt_template.format(
+            environment=environment,
+            color_desc=color_desc,
+            finish_desc=finish_desc
+        )
         
         return prompt
     
@@ -92,19 +78,7 @@ The paint color is the main focus, showing how it transforms the space."""
         
         logger.info(f"Gerando visualização: cor={color}, ambiente={environment}, acabamento={finish}")
         
-        # Mapear ambiente para descrição em inglês
-        environment_map = {
-            "quarto": "bedroom",
-            "sala": "living room",
-            "escritório": "office",
-            "banheiro": "bathroom",
-            "cozinha": "kitchen",
-            "fachada": "house exterior facade",
-            "muro": "exterior wall",
-            "varanda": "balcony",
-        }
-        
-        env_desc = environment_map.get(environment.lower(), environment)
+        env_desc = self.environment_map.get(environment.lower(), environment)
         
         try:
             # Construir prompt

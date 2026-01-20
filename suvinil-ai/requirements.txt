@@ -44,3 +44,14 @@ httpx>=0.26.0
 
 # Importação de XLSX (seed do catálogo)
 openpyxl==3.1.5
+
+# YAML para gerenciamento de prompts
+pyyaml>=6.0
+
+# ============================================
+# Testes
+# ============================================
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-mock==3.12.0
